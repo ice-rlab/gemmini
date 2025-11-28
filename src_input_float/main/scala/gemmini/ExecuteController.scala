@@ -9,7 +9,7 @@ import org.chipsalliance.cde.config.Parameters
 import midas.targetutils.PerfCounter
 
 // TODO do we still need to flush when the dataflow is weight stationary? Won't the result just keep travelling through on its own?
-class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: Int, config: GemminiArrayConfig[T, U, V])
+class ExecuteController[T <: Data, U <: Data, V <: Data, Q <: Data](xLen: Int, tagWidth: Int, config: GemminiArrayConfig[T, U, V, Q])
                                   (implicit p: Parameters, ev: Arithmetic[T]) extends Module {
   import config._
   import ev._
@@ -167,9 +167,6 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
   val c_cols = rs2s(preload_cmd_place)(32 + log2Up(block_size + 1) - 1, 32) // TODO magic numbers
   val c_rows = rs2s(preload_cmd_place)(48 + log2Up(block_size + 1) - 1, 48) // TODO magic numbers
 
-
-  val total_macs = RegInit(0.U(CounterExternal.EXTERNAL_WIDTH.W))
-
   // Dependency stuff
   io.completed.valid := false.B
   io.completed.bits := DontCare
@@ -233,14 +230,6 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
   val matmul_in_progress = mesh.io.tags_in_progress.map(_.rob_id.valid).reduce(_ || _)
 
   io.busy := cmd.valid(0) || matmul_in_progress
-
-  val mac_busy = RegInit(false.B)
-
-  val d_rows_q = Module(new Queue(UInt(log2Up(block_size + 1).W), mesh.io.tags_in_progress.length))
-  val current_d_row = d_rows_q.io.deq.bits
-  d_rows_q.io.deq.ready := false.B
-  d_rows_q.io.enq.valid := false.B
-  d_rows_q.io.enq.bits := 0.U
 
   // SRAM scratchpad
   // Fire counters which resolve same-bank accesses
@@ -703,11 +692,6 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
     }
   }
 
-when(about_to_fire_all_rows && (perform_mul_pre || perform_single_preload)) {
-	d_rows_q.io.enq.valid := true.B
-    	d_rows_q.io.enq.bits  := d_rows
-}
-
   // Computing logic
   val computing = performing_mul_pre || performing_single_mul || performing_single_preload
 
@@ -991,9 +975,6 @@ when(about_to_fire_all_rows && (perform_mul_pre || perform_single_preload)) {
       mesh_completed_rob_id_fire := true.B
       io.completed.valid := true.B
       io.completed.bits := mesh.io.resp.bits.tag.rob_id.bits
-
-      d_rows_q.io.deq.ready := true.B
-      total_macs := wrappingAdd(total_macs, current_d_row * w_matrix_rows * w_matrix_cols, ((BigInt(1) << CounterExternal.EXTERNAL_WIDTH) - 1).U)
     }
     start_array_outputting :=  !is_garbage_addr
   }
@@ -1015,13 +996,6 @@ when(about_to_fire_all_rows && (perform_mul_pre || perform_single_preload)) {
   when (reset.asBool) {
     // pending_completed_rob_id.valid := false.B
     pending_completed_rob_ids.foreach(_.valid := false.B)
-  }
-
-  //Experiemental MAC busy counter
-  when (!mac_busy && matmul_in_progress && (perform_single_mul || perform_mul_pre)) {
-	mac_busy := true.B
-  }.elsewhen (!matmul_in_progress) {
-	mac_busy := false.B
   }
 
   // Performance counter
@@ -1050,19 +1024,6 @@ when(about_to_fire_all_rows && (perform_mul_pre || perform_single_preload)) {
     !(!cntl.b_fire || mesh.io.b.fire || !mesh.io.b.ready) && !cntl.b_read_from_acc)
   io.counter.connectEventSignal(CounterEvent.SCRATCHPAD_D_WAIT_CYCLE,
     !(!cntl.d_fire || mesh.io.d.fire || !mesh.io.d.ready) && !cntl.d_read_from_acc)
-
-  io.counter.connectEventSignal(CounterEvent.EXE_ONLY_PRELOAD_CYCLE,
-    performing_single_preload)
-  io.counter.connectEventSignal(CounterEvent.EXE_OVERLAPING_CYCLE,
-    performing_mul_pre)
-  io.counter.connectEventSignal(CounterEvent.EXE_ONLY_MATMUL_CYCLE,
-    performing_single_mul)
-  io.counter.connectEventSignal(CounterEvent.MATMUL_IN_PROGRESS,
-    matmul_in_progress)
-  io.counter.connectEventSignal(CounterEvent.MAC_BUSY,
-    mac_busy)
-
-  io.counter.connectExternalCounter(CounterExternal.TOTAL_MACS, total_macs)
 
   if (use_firesim_simulation_counters) {
     val ex_flush_cycle = control_state === flushing || control_state === flush

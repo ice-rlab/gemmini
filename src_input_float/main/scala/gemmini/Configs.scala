@@ -18,8 +18,11 @@ import hardfloat._
 // -----------------------
 
 object GemminiConfigs {
-  val defaultConfig = GemminiArrayConfig[SInt, Float, Float](
+  val defaultConfig = GemminiArrayConfig[SInt, Float, Float, SInt](
     // Datatypes
+
+    scaleDownType = SInt(8.W),
+
     inputType = SInt(8.W),
     weightType = SInt(8.W),
     accType = SInt(32.W),
@@ -114,7 +117,7 @@ object GemminiConfigs {
     mvin_scale_acc_args = None,
     mvin_scale_shared = false,
 
-    acc_scale_args = Some(ScaleArguments(
+    acc_scale_args = Some(AccScaleArguments(
       (t: SInt, f: Float) => {
         val f_rec = recFNFromFN(f.expWidth, f.sigWidth, f.bits)
 
@@ -166,7 +169,8 @@ object GemminiConfigs {
     ex_write_to_acc = true,
   )
 
-  val dummyConfig = GemminiArrayConfig[DummySInt, Float, Float](
+  val dummyConfig = GemminiArrayConfig[DummySInt, Float, Float, DummySInt](
+    scaleDownType = DummySInt(8),
     inputType = DummySInt(8),
     weightType = DummySInt(8),
     accType = DummySInt(32),
@@ -208,7 +212,7 @@ object GemminiConfigs {
     mvin_scale_acc_args = None,
     mvin_scale_shared = defaultConfig.mvin_scale_shared,
 
-    acc_scale_args = Some(ScaleArguments(
+    acc_scale_args = Some(AccScaleArguments(
       (t: DummySInt, f: Float) => t.dontCare,
       1, Float(8, 24), -1,
       identity = "1.0",
@@ -226,104 +230,104 @@ object GemminiConfigs {
     ex_write_to_acc = defaultConfig.ex_write_to_acc,
   )
 
-// val countersFloat2IntConfig = GemminiArrayConfig[SInt, Float, Float, Float](
-//     // Datatypes
+val countersFloat2IntConfig = GemminiArrayConfig[SInt, Float, Float, Float](
+    // Datatypes
 
-//     scaleDownType = Float(8, 24),
+    scaleDownType = Float(8, 24),
 
-//     inputType = SInt(8.W),
-//     weightType = SInt(8.W),
-//     accType = SInt(32.W),
+    inputType = SInt(8.W),
+    weightType = SInt(8.W),
+    accType = SInt(32.W),
 
-//     spatialArrayInputType = SInt(8.W),
-//     spatialArrayWeightType = SInt(8.W),
-//     spatialArrayOutputType = SInt(20.W),
+    spatialArrayInputType = SInt(8.W),
+    spatialArrayWeightType = SInt(8.W),
+    spatialArrayOutputType = SInt(20.W),
 
-//     // Spatial array size options
-//     tileRows = 1,
-//     tileColumns = 1,
-//     meshRows = 16,
-//     meshColumns = 16,
+    // Spatial array size options
+    tileRows = 1,
+    tileColumns = 1,
+    meshRows = 16,
+    meshColumns = 16,
 
-//     // Spatial array PE options
-//     dataflow = Dataflow.BOTH,
+    // Spatial array PE options
+    dataflow = Dataflow.BOTH,
 
-//     // Scratchpad and accumulator
-//     sp_capacity = CapacityInKilobytes(256),
-//     acc_capacity = CapacityInKilobytes(64),
+    // Scratchpad and accumulator
+    sp_capacity = CapacityInKilobytes(256),
+    acc_capacity = CapacityInKilobytes(64),
 
-//     sp_banks = 4,
-//     acc_banks = 2,
+    sp_banks = 4,
+    acc_banks = 2,
 
-//     sp_singleported = true,
-//     acc_singleported = false,
+    sp_singleported = true,
+    acc_singleported = false,
 
-//     // DNN options
-//     has_training_convs = true,
-//     has_max_pool = true,
-//     has_nonlinear_activations = true,
+    // DNN options
+    has_training_convs = true,
+    has_max_pool = true,
+    has_nonlinear_activations = true,
 
-//     // Reservation station entries
-//     reservation_station_entries_ld = 8,
-//     reservation_station_entries_st = 4,
-//     reservation_station_entries_ex = 16,
+    // Reservation station entries
+    reservation_station_entries_ld = 8,
+    reservation_station_entries_st = 4,
+    reservation_station_entries_ex = 16,
 
-//     // Ld/Ex/St instruction queue lengths
-//     ld_queue_length = 8,
-//     st_queue_length = 2,
-//     ex_queue_length = 8,
+    // Ld/Ex/St instruction queue lengths
+    ld_queue_length = 8,
+    st_queue_length = 2,
+    ex_queue_length = 8,
 
-//     // DMA options
-//     max_in_flight_mem_reqs = 16,
+    // DMA options
+    max_in_flight_mem_reqs = 16,
 
-//     dma_maxbytes = 64,
-//     dma_buswidth = 128,
+    dma_maxbytes = 64,
+    dma_buswidth = 128,
 
-//     // TLB options
-//     tlb_size = 4,
+    // TLB options
+    tlb_size = 4,
 
-//     // Mvin and Accumulator scalar multiply options
-//     mvin_scale_args = Some(ScaleArguments(
-//       (t: Float, f: Float) => {
+    // Mvin and Accumulator scalar multiply options
+    mvin_scale_args = Some(ScaleArguments(
+      (t: Float, f: Float) => {
 
-// 	//val fn_to_rec_rn = Module(new RecFNFromFN(t.expWidth, t.sigWidth, t.bits))
-// 	val t_rec = recFNFromFN(f.expWidth, f.sigWidth, t.bits)
-// 	//fn_to_rec_rn.io.in := t
-//         val rec_fn_to_in = Module(new RecFNToIN(f.expWidth, f.sigWidth, t.getWidth))
-//         rec_fn_to_in.io.in := t_rec
-//         rec_fn_to_in.io.roundingMode := consts.round_near_even
-//         rec_fn_to_in.io.signedOut := true.B
+	//val fn_to_rec_rn = Module(new RecFNFromFN(t.expWidth, t.sigWidth, t.bits))
+	val t_rec = recFNFromFN(f.expWidth, f.sigWidth, t.bits)
+	//fn_to_rec_rn.io.in := t
+        val rec_fn_to_in = Module(new RecFNToIN(f.expWidth, f.sigWidth, t.getWidth))
+        rec_fn_to_in.io.in := t_rec
+        rec_fn_to_in.io.roundingMode := consts.round_near_even
+        rec_fn_to_in.io.signedOut := true.B
 
-//         val overflow = rec_fn_to_in.io.intExceptionFlags(1)
-//         val maxsat = ((1 << (t.getWidth-1))-1).S
-//         val minsat = (-(1 << (t.getWidth-1))).S
-//         val sign = rawFloatFromRecFN(f.expWidth, f.sigWidth, t_rec).sign
-//         val sat = Mux(sign, minsat, maxsat)
+        val overflow = rec_fn_to_in.io.intExceptionFlags(1)
+        val maxsat = ((1 << (t.getWidth-1))-1).S
+        val minsat = (-(1 << (t.getWidth-1))).S
+        val sign = rawFloatFromRecFN(f.expWidth, f.sigWidth, t_rec).sign
+        val sat = Mux(sign, minsat, maxsat)
 
-//         Mux(overflow, sat, rec_fn_to_in.io.out.asSInt)
-//       },
-//       4, Float(8, 24), 4,
-//       identity = "1.0",
-//       c_str = "({float y = ROUND_NEAR_EVEN((x) * (scale)); y > INT8_MAX ? INT8_MAX : (y < INT8_MIN ? INT8_MIN : (elem_t)y);})"
-//     )),
+        Mux(overflow, sat, rec_fn_to_in.io.out.asSInt)
+      },
+      4, Float(8, 24), 4,
+      identity = "1.0",
+      c_str = "({float y = ROUND_NEAR_EVEN((x) * (scale)); y > INT8_MAX ? INT8_MAX : (y < INT8_MIN ? INT8_MIN : (elem_t)y);})"
+    )),
 
-//     mvin_scale_acc_args = None,
-//     mvin_scale_shared = false,
+    mvin_scale_acc_args = None,
+    mvin_scale_shared = false,
 
-//     acc_scale_args = None, //bring this back?
+    acc_scale_args = None, //bring this back?
 
-//     // SoC counters options
-//     num_counter = 255,
+    // SoC counters options
+    num_counter = 255,
 
-//     // Scratchpad and Accumulator input/output options
-//     acc_read_full_width = true,
-//     acc_read_small_width = true,
+    // Scratchpad and Accumulator input/output options
+    acc_read_full_width = true,
+    acc_read_small_width = true,
 
-//     ex_read_from_spad = true,
-//     ex_read_from_acc = true,
-//     ex_write_to_spad = true,
-//     ex_write_to_acc = true,
-//   )
+    ex_read_from_spad = true,
+    ex_read_from_acc = true,
+    ex_write_to_spad = true,
+    ex_write_to_acc = true,
+  )
 
   val chipConfig = defaultConfig.copy(sp_capacity=CapacityInKilobytes(64), acc_capacity=CapacityInKilobytes(32), dataflow=Dataflow.WS,
     acc_scale_args=Some(defaultConfig.acc_scale_args.get.copy(latency=4)),
@@ -415,8 +419,8 @@ object GemminiConfigs {
    Also sets the system bus width to 128 bits (instead of the deafult 64 bits) to
    allow for the default 16x16 8-bit systolic array to be attached.
  */
-class DefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.defaultConfig
+class DefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V, Q] = GemminiConfigs.defaultConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -445,17 +449,17 @@ class DefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 //   )
 // })
 
-// class CountersFloat2IntGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-//   gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.countersFloat2IntConfig
-// ) extends Config((site, here, up) => {
-//   case BuildRoCC => up(BuildRoCC) ++ Seq(
-//     (p: Parameters) => {
-//       implicit val q = p
-//       val gemmini = LazyModule(new Gemmini(gemminiConfig))
-//       gemmini
-//     }
-//   )
-// })
+class CountersFloat2IntGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.countersFloat2IntConfig
+) extends Config((site, here, up) => {
+  case BuildRoCC => up(BuildRoCC) ++ Seq(
+    (p: Parameters) => {
+      implicit val q = p
+      val gemmini = LazyModule(new Gemmini(gemminiConfig))
+      gemmini
+    }
+  )
+})
 
 // class SimpleDualScalingGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 //   gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.countersFloat2IntConfig
@@ -493,8 +497,8 @@ class DefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 //   }
 // })
 
-class CountersGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.countersConfig
+class CountersGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.countersConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -505,8 +509,8 @@ class CountersGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
   )
 })
 
-class OneCombinationalArrayGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.oneCombinationalArrayConfig
+class OneCombinationalArrayGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.oneCombinationalArrayConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -518,8 +522,8 @@ class OneCombinationalArrayGemminiConfig[T <: Data : Arithmetic, U <: Data, V <:
 })
 
 //2kB spad, 2kB acc, 64 counters, 4 sp banks, 2 acc banks, datatypes
-class TwoKbSpadGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.twoKbSpadConfig
+class TwoKbSpadGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.twoKbSpadConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -531,8 +535,8 @@ class TwoKbSpadGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 })
 //twoKbSpad16BitInputConfig
 
-class TwoKbSpad16BitInputGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.twoKbSpad16BitInputConfig
+class TwoKbSpad16BitInputGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.twoKbSpad16BitInputConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -543,8 +547,8 @@ class TwoKbSpad16BitInputGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: D
   )
 })
 
-class ShiftScaleGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.shiftScaleConfig
+class ShiftScaleGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.shiftScaleConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -558,8 +562,8 @@ class ShiftScaleGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 /**
  * Mixin which sets the default lean parameters for a systolic array accelerator.
  */
-class LeanGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.leanConfig
+class LeanGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.leanConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -570,8 +574,8 @@ class LeanGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
   )
 })
 
-class LeanGemminiPrintfConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.leanPrintfConfig
+class LeanGemminiPrintfConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.leanPrintfConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {
@@ -582,8 +586,8 @@ class LeanGemminiPrintfConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
   )
 })
 
-class DummyDefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
-  gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.dummyConfig
+class DummyDefaultGemminiConfig[T <: Data : Arithmetic, U <: Data, V <: Data, Q <: Data](
+  gemminiConfig: GemminiArrayConfig[T,U,V,Q] = GemminiConfigs.dummyConfig
 ) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
     (p: Parameters) => {

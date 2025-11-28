@@ -70,14 +70,7 @@ object CounterEvent {
   val LOOP_MATMUL_ACTIVE_CYCLES = 43
   val TRANSPOSE_PRELOAD_UNROLLER_ACTIVE_CYCLES = 44
 
-  val EXE_ONLY_PRELOAD_CYCLE = 45
-  val EXE_OVERLAPING_CYCLE = 46
-  val EXE_ONLY_MATMUL_CYCLE = 47
-
-  val MATMUL_IN_PROGRESS = 48
-  val MAC_BUSY = 49
-
-  val n = 50
+  val n = 45
 }
 
 object CounterExternal {
@@ -93,9 +86,10 @@ object CounterExternal {
   val RDMA_TOTAL_LATENCY = 6
   val WDMA_TOTAL_LATENCY = 7
 
-  val TOTAL_MACS = 8
+  //val BYTE_REC_SUM = 8
 
-  val n = 9
+  //val n = 9
+  val n = 8
 
   val EXTERNAL_WIDTH = 32
 }
