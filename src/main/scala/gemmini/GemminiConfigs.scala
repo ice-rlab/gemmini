@@ -10,6 +10,15 @@ sealed abstract trait GemminiMemCapacity
 case class CapacityInKilobytes(kilobytes: Int) extends GemminiMemCapacity
 case class CapacityInMatrices(matrices: Int) extends GemminiMemCapacity
 
+class ScaleFuncOutputs[T <: Data, U <: Data](t: T, u: U) extends Bundle {
+  val result = t.cloneType
+  val profiling  = u.cloneType
+}
+
+case class ProfilingScaleArguments[T <: Data, U <: Data](scale_func: (T, U) => ScaleFuncOutputs[T, U], latency: Int, multiplicand_t: U,
+                                                num_scale_units: Int,
+                                                identity: String="0", c_str: String="ROUNDING_RIGHT_SHIFT(x, scale)")
+
 case class ScaleArguments[T <: Data, U <: Data](scale_func: (T, U) => T, latency: Int, multiplicand_t: U,
                                                 num_scale_units: Int,
                                                 identity: String="0", c_str: String="ROUNDING_RIGHT_SHIFT(x, scale)")
@@ -57,8 +66,8 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
 
                                                                              aligned_to: Int = 1, // TODO we should align to inputType and accType instead
 
-                                                                             mvin_scale_args: Option[ScaleArguments[T, U]] = None,
-                                                                             mvin_scale_acc_args: Option[ScaleArguments[T, U]] = None,
+                                                                             mvin_scale_args: Option[ProfilingScaleArguments[T, U]] = None,
+                                                                             mvin_scale_acc_args: Option[ProfilingScaleArguments[T, U]] = None,
                                                                              mvin_scale_shared: Boolean = false,
                                                                              acc_scale_args: Option[ScaleArguments[T, V]] = None,
 

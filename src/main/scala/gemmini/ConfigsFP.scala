@@ -56,11 +56,29 @@ object GemminiFPConfigs {
     spatialArrayWeightType = Float(8, 24),
     spatialArrayOutputType = Float(8, 24),
 
-    mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
-    mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+    mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+    mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
     mvin_scale_shared = false,
 
-    acc_scale_args = Some(AccScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0",
+    acc_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0",
       c_str = "((x) * (scale))"
     )),
     acc_read_full_width = true,
@@ -87,16 +105,52 @@ object GemminiFPConfigs {
   //FP32 Single Precision Configuration
   val FP32DefaultConfig = defaultFPConfig.copy(inputType = Float(8, 24), weightType = Float(8, 24), accType = Float(8, 24), spatialArrayInputType = Float(8, 24), spatialArrayWeightType = Float(8, 24), spatialArrayOutputType = Float(8, 24),
                                                tile_latency = 2,
-                                               mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
-                                               mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
                                               )
 
 
   //intended to be used in a "dual" setup
   val FP32CountersConfig = defaultFPConfig.copy(inputType = Float(8, 24), weightType = Float(8, 24), accType = Float(8, 24), spatialArrayInputType = Float(8, 24), spatialArrayWeightType = Float(8, 24), spatialArrayOutputType = Float(8, 24),
                                                tile_latency = 2,
-                                               mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
-                                               mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
 					       num_counter = 255, opcodes = OpcodeSet.custom2,
 					       headerFileName = "gemmini_32FP_params.h"
                                               )
@@ -104,31 +158,94 @@ object GemminiFPConfigs {
   //FP16 Half Precision Configuration
   val FP16DefaultConfig = defaultFPConfig.copy(inputType = Float(5, 11), weightType = Float(5, 11), accType = Float(8, 24), spatialArrayInputType = Float(5, 11), spatialArrayWeightType = Float(5, 11), spatialArrayOutputType = Float(5, 11),
                                                tile_latency = 2,
-                                               mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(5, 11), -1, identity = "1.0", c_str="((x) * (scale))")),
-                                               mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(5, 11), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(5, 11), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(5, 11), -1, identity = "1.0", c_str="((x) * (scale))")),
                                               )
   
   //Bfloat16 Brain-half Precision Configuration
   val BF16DefaultConfig = defaultFPConfig.copy(inputType = Float(8, 8), weightType = Float(8, 8), accType = Float(8, 24), spatialArrayInputType = Float(8, 8), spatialArrayWeightType = Float(8, 8), spatialArrayOutputType = Float(8, 8),
                                                tile_latency = 2,
-                                               mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
-                                               mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
                                               )
 
   //Bfloat16 Brain-half Precision Configuration 8x8 array
   val BF16Default8Config = defaultFPConfig.copy(inputType = Float(8, 8), weightType = Float(8, 8), accType = Float(8, 24), spatialArrayInputType = Float(8, 8), spatialArrayWeightType = Float(8, 8), spatialArrayOutputType = Float(8, 8),
                                                meshRows = 8, meshColumns = 8,
                                                tile_latency = 2,
-                                               mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
-                                               mvin_scale_acc_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+                                               mvin_scale_acc_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 4, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
                                               )
 
 
   val chipFP32Config = FP32DefaultConfig.copy(sp_capacity=CapacityInKilobytes(32), acc_capacity=CapacityInKilobytes(8), dataflow=Dataflow.WS,
-    acc_scale_args = Some(AccScaleArguments((t: Float, u: Float) => {t}, 1, Float(8, 24), -1, identity = "1.0",
+    acc_scale_args = Some(ScaleArguments((t: Float, u: Float) => {t}, 1, Float(8, 24), -1, identity = "1.0",
       c_str = "((x))"
     )),
-    mvin_scale_args = Some(ScaleArguments((t: Float, u: Float) => t * u, 3, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
+    mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
+	val scaled_out = t * u
+	val profiling_out = 0.asTypeOf(u)
+
+	val out = Wire(New ScaleFuncOutputs(t,u))
+	out.result := scaled_out
+	out.profiling := profiling_out
+
+	out
+    }, 3, Float(8, 24), -1, identity = "1.0", c_str="((x) * (scale))")),
     mvin_scale_acc_args=None,
     acc_singleported=false,
     acc_sub_banks = 1,

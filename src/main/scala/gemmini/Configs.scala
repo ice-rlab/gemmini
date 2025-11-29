@@ -72,7 +72,7 @@ object GemminiConfigs {
     tlb_size = 4,
 
     // Mvin and Accumulator scalar multiply options
-    mvin_scale_args = Some(ScaleArguments(
+    mvin_scale_args = Some(ProfilingScaleArguments(
       (t: SInt, f: Float) => {
         val f_rec = recFNFromFN(f.expWidth, f.sigWidth, f.bits)
 
@@ -104,7 +104,17 @@ object GemminiConfigs {
         val sign = rawFloatFromRecFN(f.expWidth, f.sigWidth, rec_fn_to_in.io.in).sign
         val sat = Mux(sign, minsat, maxsat)
 
-        Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t))
+        //Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t)) old return value
+
+	val scaled_result = Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t))
+
+	val profiling_val = 0.asTypeOf(u)
+
+	val out = Wire(new ScaleFuncOutputs(t, u))
+	out.result := scaled_result
+	out.profiling := prof_val
+
+	out
       },
       4, Float(8, 24), 4,
       identity = "1.0",
@@ -198,8 +208,17 @@ object GemminiConfigs {
     dma_buswidth = defaultConfig.dma_buswidth,
     tlb_size = defaultConfig.tlb_size,
 
-    mvin_scale_args = Some(ScaleArguments(
-      (t: DummySInt, f: Float) => t.dontCare,
+    mvin_scale_args = Some(ProfilingScaleArguments(
+      (t: DummySInt, f: Float) => {
+	val t_out = t.dontCare
+	val profiling_out = f.dontCare
+
+	val out = Wire(new ScaleFuncOutputs(t,f))
+	out.result := t_out
+	out.profiling := profiling_out
+
+	out
+	},
       4, Float(8, 24), 4,
       identity = "1.0",
       c_str = "({float y = ROUND_NEAR_EVEN((x) * (scale)); y > INT8_MAX ? INT8_MAX : (y < INT8_MIN ? INT8_MIN : (elem_t)y);})"
@@ -395,8 +414,17 @@ object GemminiConfigs {
 
   val shiftScaleConfig = defaultConfig.copy(use_firesim_simulation_counters=true, //trying to use same number of sp and acc banks as normal design, one bank not supported
     num_counter = 64,
-    mvin_scale_args = Some(ScaleArguments(
-  	(t: SInt, scale: Float) => (t >> 4).asTypeOf(t),
+    mvin_scale_args = Some(ProfilingScaleArguments(
+  	(t: SInt, scale: Float) => {
+		val t_out = (t >> 4).asTypeOf(t)
+		val profiling_out = 0.asTypeOf(scale)
+
+		val out = Wire(new ScaleFuncOutputs(t, scale))
+		out.result := t_out
+		out.profiling := profiling_out
+
+		out
+	},
   	4, Float(8, 24), -1,
   	identity = "1.0",
   	c_str = "(x >> 4)"
