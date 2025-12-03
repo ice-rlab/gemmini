@@ -406,13 +406,13 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
 
     val (mvin_scale_in, mvin_scale_out) = VectorScalarMultiplier(
       config.mvin_scale_args,
-      config.inputType, config.meshColumns * config.tileColumns, chiselTypeOf(reader.module.io.resp.bits),
+      config.inputType, config.meshColumns * config.tileColumns, chiselTypeOf(reader.module.io.resp.bits), mvin_scale_t.asInstanceOf[U],
       is_acc = false
     )
     val (mvin_scale_acc_in, mvin_scale_acc_out) = if (mvin_scale_shared) (mvin_scale_in, mvin_scale_out) else (
       VectorScalarMultiplier(
         config.mvin_scale_acc_args,
-        config.accType, config.meshColumns * config.tileColumns, chiselTypeOf(reader.module.io.resp.bits),
+        config.accType, config.meshColumns * config.tileColumns, chiselTypeOf(reader.module.io.resp.bits), mvin_scale_t.asInstanceOf[U],
         is_acc = true
       )
     )
@@ -444,7 +444,7 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
       mvin_scale_acc_in.valid := reader.module.io.resp.valid &&
         (reader.module.io.resp.bits.is_acc && reader.module.io.resp.bits.has_acc_bitwidth)
       mvin_scale_acc_in.bits.in := reader.module.io.resp.bits.data.asTypeOf(chiselTypeOf(mvin_scale_acc_in.bits.in))
-      mvin_scale_acc_in.bits.scale := reader.module.io.resp.bits.scale.asTypeOf(mvin_scale_acc_t)
+      mvin_scale_acc_in.bits.scale := reader.module.io.resp.bits.scale.asTypeOf(mvin_scale_t)
       mvin_scale_acc_in.bits.repeats := reader.module.io.resp.bits.repeats
       mvin_scale_acc_in.bits.pixel_repeats := 1.U
       mvin_scale_acc_in.bits.last := reader.module.io.resp.bits.last
@@ -886,6 +886,44 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
     io.counter.collect(reader.module.io.counter)
     io.counter.collect(writer.module.io.counter)
     spad_writer.foreach(_.module.io.counter := DontCare)
+
+	val addFunc: (U, U) => U = mvin_scale_t.asInstanceOf[U] match {
+  case _: UInt =>
+    (a: U, b: U) =>
+      (Arithmetic.UIntArithmetic.cast(a.asInstanceOf[UInt]) +
+       b.asInstanceOf[UInt]).asInstanceOf[U]
+
+  case _: SInt =>
+    (a: U, b: U) =>
+      (Arithmetic.SIntArithmetic.cast(a.asInstanceOf[SInt]) +
+       b.asInstanceOf[SInt]).asInstanceOf[U]
+
+  case _: Float =>
+    {
+      (a: U, b: U) =>
+        (Arithmetic.FloatArithmetic.cast(a.asInstanceOf[Float]) +
+         b.asInstanceOf[Float]).asInstanceOf[U]
+    }
+
+  case _: Bool =>
+    // Booleans don't have ArithmeticOps, so implement OR as addition
+    (a: U, b: U) =>
+      (a.asInstanceOf[Bool] | b.asInstanceOf[Bool]).asUInt.asInstanceOf[U]
+	}
+
+    // External counters
+    val profiling_sum_output = RegInit(0.U(CounterExternal.EXTERNAL_WIDTH.W))
+    //val profiling_sum = RegInit(0.U.asTypeOf(u)(CounterExternal.EXTERNAL_WIDTH.W))
+    val profiling_sum = RegInit(0.U.asTypeOf(mvin_scale_t.asInstanceOf[U]))
+    when (io.counter.external_reset) {
+      profiling_sum := 0.U.asTypeOf(mvin_scale_t.asInstanceOf[U])
+      profiling_sum_output := 0.U
+    }.elsewhen (mvin_scale_out.fire) {
+      val next_sum = mvin_scale_out.bits.profiling.reduceTree(addFunc)
+      profiling_sum := addFunc(profiling_sum, next_sum)
+    }
+    profiling_sum_output := profiling_sum.asUInt
+    io.counter.connectExternalCounter(CounterExternal.PROFILING_SUM, profiling_sum_output)
 //    io.counter.collect(spad_writer.module.io.counter)
   }
 }

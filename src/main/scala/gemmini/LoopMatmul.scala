@@ -182,7 +182,7 @@ class LoopMatmulLdB(block_size: Int, coreMaxAddrBits: Int, iterator_bitwidth: In
   val sp_addr = sp_addr_start + (row_iterator * max_col_iterator + col_iterator) * block_size.U
   val blocks = Mux(col_iterator + max_blocks <= max_col_iterator, max_blocks, max_col_iterator-col_iterator)
   val cols = (blocks * block_size.U) - Mux(col_iterator + blocks >= max_col_iterator, col_pad, 0.U)
-  val rows = block_size.U - Mux(max_row_iterator === max_row_iterator-1.U, row_pad, 0.U)
+  val rows = block_size.U - Mux(row_iterator === max_row_iterator-1.U, row_pad, 0.U)
 
   val mvin_cmd = Wire(new RoCCCommand)
   mvin_cmd := DontCare

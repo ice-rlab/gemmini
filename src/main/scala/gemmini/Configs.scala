@@ -108,11 +108,11 @@ object GemminiConfigs {
 
 	val scaled_result = Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t))
 
-	val profiling_val = 0.asTypeOf(u)
+	val profiling_val = 0.U.asTypeOf(f)
 
-	val out = Wire(new ScaleFuncOutputs(t, u))
+	val out = Wire(new ScaleFuncOutputs(t, f))
 	out.result := scaled_result
-	out.profiling := prof_val
+	out.profiling := profiling_val
 
 	out
       },
@@ -211,7 +211,8 @@ object GemminiConfigs {
     mvin_scale_args = Some(ProfilingScaleArguments(
       (t: DummySInt, f: Float) => {
 	val t_out = t.dontCare
-	val profiling_out = f.dontCare
+	//val profiling_out = f.dontCare
+	val profiling_out = 0.U.asTypeOf(f)
 
 	val out = Wire(new ScaleFuncOutputs(t,f))
 	out.result := t_out
@@ -368,7 +369,7 @@ object GemminiConfigs {
   )
 
   val twoKbSpad16BitInputConfig = defaultConfig.copy(sp_capacity=CapacityInKilobytes(2), acc_capacity=CapacityInKilobytes(2), //trying to use same number of sp and acc banks as normal design, one bank not supported
-    num_counter = 64, scaleDownType = SInt(16.W), inputType = SInt(16.W),
+    num_counter = 64, inputType = SInt(16.W),
     weightType = SInt(16.W), spatialArrayInputType = SInt(16.W),
     spatialArrayWeightType = SInt(16.W),
   )
@@ -417,7 +418,7 @@ object GemminiConfigs {
     mvin_scale_args = Some(ProfilingScaleArguments(
   	(t: SInt, scale: Float) => {
 		val t_out = (t >> 4).asTypeOf(t)
-		val profiling_out = 0.asTypeOf(scale)
+		val profiling_out = 0.U.asTypeOf(scale)
 
 		val out = Wire(new ScaleFuncOutputs(t, scale))
 		out.result := t_out

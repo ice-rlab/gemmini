@@ -95,7 +95,9 @@ object CounterExternal {
 
   val TOTAL_MACS = 8
 
-  val n = 9
+  val PROFILING_SUM = 9
+
+  val n = 10
 
   val EXTERNAL_WIDTH = 32
 }

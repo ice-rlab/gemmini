@@ -15,54 +15,66 @@ class VectorScalarMultiplierReq[T <: Data, U <: Data, Tag <: Data](block_cols: I
 
 }
 
-class VectorScalarMultiplierResp[T <: Data, Tag <: Data](block_cols: Int, t: T, tag_t: Tag) extends Bundle {
+class VectorScalarMultiplierResp[T <: Data, U <: Data, Tag <: Data](block_cols: Int, t: T, u: U, tag_t: Tag) extends Bundle {
   val out: Vec[T] = Vec(block_cols, t.cloneType)
+  val profiling: Vec[U] = Vec(block_cols, u.cloneType)
   val row: UInt = UInt(16.W) // TODO magic number
   val last: Bool = Bool()
   val tag: Tag = tag_t.cloneType
-
 }
 
-class DataWithIndex[T <: Data, U <: Data](t: T, u: U) extends Bundle {
+class VectorScalarMultiplierProfiling[U <: Data](block_cols: Int, u: U) extends Bundle {
+  val profiling: Vec[U] = Vec(block_cols, u.cloneType)
+}
+
+class DataWithIndex[T <: Data, U <: Data](t: T, u: U, p: U) extends Bundle {
   val data = t.cloneType
+  val profiling = p.cloneType
   val scale = u.cloneType
   val id = UInt(2.W) // TODO hardcoded
   val index = UInt()
 }
 
-class ScalePipe[T <: Data, U <: Data](t: T, mvin_scale_args: ScaleArguments[T, U]) extends Module {
+class ScalePipe[T <: Data, U <: Data](t: T, mvin_scale_args: ProfilingScaleArguments[T, U]) extends Module {
   val u = mvin_scale_args.multiplicand_t
+  val p = 0.U.asTypeOf(u)
   val io = IO(new Bundle {
-    val in = Input(Valid(new DataWithIndex(t, u)))
-    val out = Output(Valid(new DataWithIndex(t, u)))
+    val in = Input(Valid(new DataWithIndex(t, u, p)))
+    val out = Output(Valid(new DataWithIndex(t, u, p)))
   })
   val latency = mvin_scale_args.latency
-  val out = WireInit(io.in)
-  out.bits.data := mvin_scale_args.scale_func(io.in.bits.data, io.in.bits.scale.asTypeOf(u))
+  //val out = WireInit(io.in)
+  val out = Wire(Valid(new DataWithIndex(t, u, p)))
+  out := io.in
+  val scale_func_out = Wire(new ScaleFuncOutputs(t, u))
+  //out.bits.data := mvin_scale_args.scale_func(io.in.bits.data, io.in.bits.scale.asTypeOf(u))
+  scale_func_out := mvin_scale_args.scale_func(io.in.bits.data, io.in.bits.scale.asTypeOf(u))
+  out.bits.data := scale_func_out.result
+  out.bits.profiling := scale_func_out.profiling
   io.out := Pipe(out, latency)
 }
 
 class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
-  mvin_scale_args: Option[ScaleArguments[T, U]], block_cols: Int, t: T, tag_t: Tag
+  mvin_scale_args: Option[ProfilingScaleArguments[T, U]], block_cols: Int, t: T, tag_t: Tag, u_t: U
 ) extends Module {
 
   val (u, num_scale_units, always_identity) = mvin_scale_args match {
-    case Some(ScaleArguments(_, _, multiplicand_t, num_scale_units, _, _)) => (multiplicand_t, num_scale_units, false)
+    case Some(ProfilingScaleArguments(_, _, multiplicand_t, num_scale_units, _, _)) => (multiplicand_t, num_scale_units, false)
     case None => (Bool(), -1, true) // TODO make this a 0-width UInt
   }
-
+  val p = 0.U.asTypeOf(u_t)
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new VectorScalarMultiplierReq(block_cols, t, u, tag_t)))
-    val resp = Decoupled(new VectorScalarMultiplierResp(block_cols, t, tag_t))
+    val req = Flipped(Decoupled(new VectorScalarMultiplierReq(block_cols, t, u_t, tag_t)))
+    val resp = Decoupled(new VectorScalarMultiplierResp(block_cols, t, u_t, tag_t))
   })
 
   val width = block_cols
   val latency = mvin_scale_args match {
-    case Some(ScaleArguments(_, latency, _, _, _, _)) => latency
+    case Some(ProfilingScaleArguments(_, latency, _, _, _, _)) => latency
     case None => 0
   }
 
-  val in = Reg(Valid(new VectorScalarMultiplierReq(block_cols, t, u, tag_t)))
+  val in = Reg(Valid(new VectorScalarMultiplierReq(block_cols, t, u_t, tag_t)))
   val in_fire = WireInit(false.B)
   io.req.ready := !in.valid || (in.bits.repeats === 0.U && in_fire)
 
@@ -80,8 +92,8 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
   }
 
   if (num_scale_units == -1) {
-    val pipe = Module(new Pipeline[VectorScalarMultiplierResp[T, Tag]](
-      new VectorScalarMultiplierResp(block_cols, t, tag_t),
+    val pipe = Module(new Pipeline[VectorScalarMultiplierResp[T, U, Tag]](
+      new VectorScalarMultiplierResp(block_cols, t, u_t, tag_t),
       latency
     )())
     io.resp <> pipe.io.out
@@ -91,15 +103,23 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
     pipe.io.in.bits.tag := in.bits.tag
     pipe.io.in.bits.last := in.bits.repeats === 0.U && in.bits.last
     pipe.io.in.bits.row := in.bits.repeats
-    pipe.io.in.bits.out := (mvin_scale_args match {
-      case Some(ScaleArguments(mvin_scale_func, _, multiplicand_t, _, _, _)) =>
+    val pipe_scale_func_out = Wire(Vec(block_cols, new ScaleFuncOutputs(t, u_t)))
+    pipe_scale_func_out := (mvin_scale_args match {
+      case Some(ProfilingScaleArguments(mvin_scale_func, _, multiplicand_t, _, _, _)) =>
         in.bits.in.map(x => mvin_scale_func(x, in.bits.scale.asTypeOf(multiplicand_t)))
-      case None => in.bits.in
+      case None => VecInit(in.bits.in.map { x =>
+		val out = Wire(new ScaleFuncOutputs(t, u_t))
+		out.result := x
+		out.profiling := 0.U.asTypeOf(u_t)
+		out
+		})
     })
+    pipe.io.in.bits.out := VecInit(pipe_scale_func_out.map(_.result))
+    pipe.io.in.bits.profiling := VecInit(pipe_scale_func_out.map(_.profiling))
   } else {
     val nEntries = 3
-    val regs = Reg(Vec(nEntries, Valid(new VectorScalarMultiplierReq(block_cols, t, u, tag_t))))
-    val out_regs = Reg(Vec(nEntries, new VectorScalarMultiplierResp(block_cols, t, tag_t)))
+    val regs = Reg(Vec(nEntries, Valid(new VectorScalarMultiplierReq(block_cols, t, u_t, tag_t))))
+    val out_regs = Reg(Vec(nEntries, new VectorScalarMultiplierResp(block_cols, t, u_t, tag_t)))
 
     val fired_masks = Reg(Vec(nEntries, Vec(width, Bool())))
     val completed_masks = Reg(Vec(nEntries, Vec(width, Bool())))
@@ -128,6 +148,7 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
           out_regs(i).last := in.bits.repeats === 0.U && in.bits.last
           out_regs(i).row := in.bits.repeats
           out_regs(i).out := in.bits.in
+		  out_regs(i).profiling := VecInit(Seq.fill(width)(0.U.asTypeOf(u_t)))
           val identity = (u match {
             case u: UInt => Arithmetic.UIntArithmetic.cast(u).identity
             case s: SInt => Arithmetic.SIntArithmetic.cast(s).identity
@@ -141,7 +162,7 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
       tail_oh := (tail_oh << 1) | tail_oh(nEntries-1)
     }
 
-    val inputs = Seq.fill(width*nEntries) { Wire(Decoupled(new DataWithIndex(t, u))) }
+    val inputs = Seq.fill(width*nEntries) { Wire(Decoupled(new DataWithIndex(t, u_t, p))) }
     for (i <- 0 until nEntries) {
       for (w <- 0 until width) {
         val input = inputs(i*width+w)
@@ -157,10 +178,10 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
     }
     for (i <- 0 until num_scale_units) {
       val arbIn = inputs.zipWithIndex.filter({ case (_, w) => w % num_scale_units == i }).map(_._1)
-      val arb = Module(new RRArbiter(new DataWithIndex(t, u), arbIn.length))
+      val arb = Module(new RRArbiter(new DataWithIndex(t, u_t, p), arbIn.length))
       arb.io.in <> arbIn
       arb.io.out.ready := true.B
-      val arbOut = Reg(Valid(new DataWithIndex(t, u)))
+      val arbOut = Reg(Valid(new DataWithIndex(t, u_t, p)))
       arbOut.valid := arb.io.out.valid
       arbOut.bits := arb.io.out.bits
       when (reset.asBool) {
@@ -175,6 +196,7 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
           if ((j*width+w) % num_scale_units == i) {
             when (pipe_out.fire && pipe_out.bits.id === j.U && pipe_out.bits.index === w.U) {
               out_regs(j).out(w) := pipe_out.bits.data
+			  out_regs(j).profiling(w) := pipe_out.bits.profiling
               completed_masks(j)(w) := true.B
             }
           }
@@ -191,13 +213,13 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
 object VectorScalarMultiplier {
   // Returns the input and output IO of the module (together with the pipeline)
   def apply[T <: Data, U <: Data, Tag <: Data](
-    scale_args: Option[ScaleArguments[T, U]],
-    t: T, cols: Int, tag_t: Tag,
+    scale_args: Option[ProfilingScaleArguments[T, U]],
+    t: T, cols: Int, tag_t: Tag, u_t: U,
     is_acc: Boolean,
     is_mvin: Boolean=true
   ) = {
     assert(!is_acc || is_mvin)
-    val vsm = Module(new VectorScalarMultiplier(scale_args, cols, t, tag_t))
+    val vsm = Module(new VectorScalarMultiplier(scale_args, cols, t, tag_t, u_t))
     val vsm_in_q = Module(new Queue(chiselTypeOf(vsm.io.req.bits), 2))
     vsm.io.req <> vsm_in_q.io.deq
     (vsm_in_q.io.enq, vsm.io.resp) 

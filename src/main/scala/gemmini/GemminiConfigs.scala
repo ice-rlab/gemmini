@@ -126,12 +126,12 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
   val local_addr_t = new LocalAddr(sp_banks, sp_bank_entries, acc_banks, acc_bank_entries)
 
   val mvin_scale_t = mvin_scale_args match {
-    case Some(ScaleArguments(_, _, t, _, _, _)) => t
+    case Some(ProfilingScaleArguments(_, _, t, _, _, _)) => t
     case None => Bool() // TODO replace this with UInt(0.W)
   }
 
   val mvin_scale_acc_t = mvin_scale_acc_args match {
-    case Some(ScaleArguments(_, _, t, _, _, _)) => t
+    case Some(ProfilingScaleArguments(_, _, t, _, _, _)) => t
     case None => Bool() // TODO replace this with UInt(0.W)
   }
 
@@ -421,7 +421,7 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
     header ++= s"#define row_align_acc(blocks) __attribute__((aligned(blocks*DIM*sizeof(acc_t))))\n\n"
 
     val mvin_scale_identity = mvin_scale_args match {
-      case Some(ScaleArguments(_, _, _, _, identity, _)) => identity
+      case Some(ProfilingScaleArguments(_, _, _, _, identity, _)) => identity
       case None => "0"
     }
     header ++= s"#define MVIN_SCALE_IDENTITY $mvin_scale_identity\n\n"
