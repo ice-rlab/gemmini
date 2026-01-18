@@ -24,6 +24,8 @@ class ScratchpadMemReadRequest[U <: Data](local_addr_t: LocalAddr, scale_t_bits:
   val cmd_id = UInt(8.W) // TODO don't use a magic number here
   val status = new MStatus
 
+  val load_state_id = UInt(2.W)
+
 }
 
 class ScratchpadMemWriteRequest(local_addr_t: LocalAddr, acc_t_bits: Int, scale_t_bits: Int)
@@ -403,6 +405,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
     reader.module.io.req.bits.block_stride := read_issue_q.io.deq.bits.block_stride
     reader.module.io.req.bits.status := read_issue_q.io.deq.bits.status
     reader.module.io.req.bits.cmd_id := read_issue_q.io.deq.bits.cmd_id
+
+    reader.module.io.req.bits.load_state_id := read_issue_q.io.deq.bits.load_state_id
 
     val (mvin_scale_in, mvin_scale_out) = VectorScalarMultiplier(
       config.mvin_scale_args,
@@ -912,18 +916,44 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
 	}
 
     // External counters
-    val profiling_sum_output = RegInit(0.U(CounterExternal.EXTERNAL_WIDTH.W))
+    val profiling_sum_output = RegInit(VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W))))
     //val profiling_sum = RegInit(0.U.asTypeOf(u)(CounterExternal.EXTERNAL_WIDTH.W))
-    val profiling_sum = RegInit(0.U.asTypeOf(mvin_scale_t.asInstanceOf[U]))
+    val profiling_sum = RegInit(VecInit(Seq.fill(3)(0.U.asTypeOf(mvin_scale_t.asInstanceOf[U]))))
+    val u_bytes = mvin_scale_t.asInstanceOf[U].getWidth / 8
+    val element_mask = VecInit(((0 until mvin_scale_out.bits.tag.mask.length by u_bytes).map(i => mvin_scale_out.bits.tag.mask(i))).take(block_cols))
+    //val bytes_loaded = RegInit(0.U(CounterExternal.EXTERNAL_WIDTH.W))
+	val bytes_read = RegInit(0.U(CounterExternal.EXTERNAL_WIDTH.W))
     when (io.counter.external_reset) {
-      profiling_sum := 0.U.asTypeOf(mvin_scale_t.asInstanceOf[U])
-      profiling_sum_output := 0.U
+      profiling_sum := VecInit(Seq.fill(3)(0.U.asTypeOf(mvin_scale_t.asInstanceOf[U])))
+      profiling_sum_output := VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W)))
+      //bytes_loaded := 0.U(CounterExternal.EXTERNAL_WIDTH.W)
     }.elsewhen (mvin_scale_out.fire) {
-      val next_sum = mvin_scale_out.bits.profiling.reduceTree(addFunc)
-      profiling_sum := addFunc(profiling_sum, next_sum)
+      val useful_elements = VecInit(mvin_scale_out.bits.profiling.zip(element_mask).map { case (p, m) => Mux(m, p, 0.U.asTypeOf(p))})
+      val next_sum = useful_elements.reduceTree(addFunc)
+      profiling_sum(mvin_scale_out.bits.tag.load_state_id) := addFunc(profiling_sum(mvin_scale_out.bits.tag.load_state_id), next_sum)
+      //bytes_loaded := bytes_loaded + mvin_scale_out.bits.tag.bytes_read
     }
-    profiling_sum_output := profiling_sum.asUInt
-    io.counter.connectExternalCounter(CounterExternal.PROFILING_SUM, profiling_sum_output)
+    //profiling_sum_output := profiling_sum.asUInt
+    profiling_sum_output(0) := profiling_sum(0).asUInt
+    profiling_sum_output(1) := profiling_sum(1).asUInt
+    profiling_sum_output(2) := profiling_sum(2).asUInt
+    io.counter.connectExternalCounter(CounterExternal.PROFILING_SUM_A, profiling_sum_output(0))
+    io.counter.connectExternalCounter(CounterExternal.PROFILING_SUM_B, profiling_sum_output(1))
+    io.counter.connectExternalCounter(CounterExternal.PROFILING_SUM_D, profiling_sum_output(2))
+
+    //io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED, bytes_loaded)
+    io.counter.connectEventSignal(CounterEvent.STREAM_READER_BUSY, reader.module.io.busy)
+    io.counter.connectEventSignal(CounterEvent.STREAM_WRITER_BUSY, writer.module.io.busy)
+
+	when (io.counter.external_reset) {
+      bytes_read := 0.U(CounterExternal.EXTERNAL_WIDTH.W)
+    }.elsewhen (write_issue_q.io.deq.fire) {
+      bytes_read := bytes_read + Mux(writeData_is_full_width,
+      write_issue_q.io.deq.bits.len * (accType.getWidth / 8).U,
+      write_issue_q.io.deq.bits.len * (inputType.getWidth / 8).U)
+    }
+	io.counter.connectExternalCounter(CounterExternal.BYTES_READ, bytes_read)
+
 //    io.counter.collect(spad_writer.module.io.counter)
   }
 }

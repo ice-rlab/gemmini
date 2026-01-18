@@ -169,6 +169,7 @@ class VectorScalarMultiplier[T <: Data, U <: Data, Tag <: Data](
         input.valid       := regs(i).valid && !fired_masks(i)(w)
         input.bits.data   := regs(i).bits.in(w)
         input.bits.scale  := regs(i).bits.scale.asTypeOf(u)
+	input.bits.profiling := 0.U.asTypeOf(p)
         input.bits.id := i.U
         input.bits.index := w.U
         when (input.fire) {

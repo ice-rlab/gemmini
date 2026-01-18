@@ -30,6 +30,7 @@ class StreamReadRequest[U <: Data](spad_rows: Int, acc_rows: Int, mvin_scale_t_b
   val block_stride = UInt(16.W) // TODO magic number
   val cmd_id = UInt(8.W) // TODO magic number
 
+  val load_state_id = UInt(2.W)
 }
 
 class StreamReadResponse[U <: Data](spadWidth: Int, accWidth: Int, spad_rows: Int, acc_rows: Int, aligned_to: Int, mvin_scale_t_bits: Int)
@@ -48,6 +49,7 @@ class StreamReadResponse[U <: Data](spadWidth: Int, accWidth: Int, spad_rows: In
   val bytes_read = UInt(8.W) // TODO magic number
   val cmd_id = UInt(8.W) // TODO magic number
 
+  val load_state_id = UInt(2.W)
 }
 
 class StreamReader[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, U, V], nXacts: Int, beatBits: Int, maxBytes: Int, spadWidth: Int, accWidth: Int, aligned_to: Int,
@@ -102,6 +104,7 @@ class StreamReader[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T
     io.resp.bits.scale := RegEnable(xactTracker.io.peek.entry.scale, beatPacker.io.req.fire)
     io.resp.bits.repeats := RegEnable(xactTracker.io.peek.entry.repeats, beatPacker.io.req.fire)
     io.resp.bits.pixel_repeats := RegEnable(xactTracker.io.peek.entry.pixel_repeats, beatPacker.io.req.fire)
+    io.resp.bits.load_state_id := RegEnable(xactTracker.io.peek.entry.load_state_id, beatPacker.io.req.fire)
     io.resp.bits.len := RegEnable(xactTracker.io.peek.entry.len, beatPacker.io.req.fire)
     io.resp.bits.cmd_id := RegEnable(xactTracker.io.peek.entry.cmd_id, beatPacker.io.req.fire)
     io.resp.bits.bytes_read := RegEnable(xactTracker.io.peek.entry.bytes_to_read, beatPacker.io.req.fire)
@@ -110,6 +113,18 @@ class StreamReader[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T
     io.counter := DontCare
     io.counter.collect(core.module.io.counter)
     io.counter.collect(xactTracker.io.counter)
+
+    val bytes_loaded = RegInit(VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W))))
+
+  when (io.counter.external_reset) {
+	bytes_loaded := VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W)))
+  }.elsewhen (beatPacker.io.req.fire) {
+	bytes_loaded(xactTracker.io.peek.entry.load_state_id) := bytes_loaded(xactTracker.io.peek.entry.load_state_id) + xactTracker.io.peek.entry.bytes_to_read
+  }
+
+  io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_A, bytes_loaded(0))
+  io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_B, bytes_loaded(1))
+  io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_D, bytes_loaded(2))
   }
 }
 
@@ -258,6 +273,7 @@ class StreamReaderCore[T <: Data, U <: Data, V <: Data](config: GemminiArrayConf
     io.reserve.entry.scale := req.scale
     io.reserve.entry.repeats := req.repeats
     io.reserve.entry.pixel_repeats := req.pixel_repeats
+    io.reserve.entry.load_state_id := req.load_state_id
     io.reserve.entry.len := req.len
     io.reserve.entry.block_stride := req.block_stride
     io.reserve.entry.lg_len_req := DontCare // TODO just remove this from the IO completely

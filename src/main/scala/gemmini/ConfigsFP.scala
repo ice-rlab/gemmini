@@ -1,6 +1,7 @@
 package gemmini
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.{Config, Parameters}
 import freechips.rocketchip.diplomacy.{LazyModule, ValName}
 import freechips.rocketchip.subsystem._
@@ -134,6 +135,53 @@ val FP32ProfilingConfig = defaultFPConfig.copy(inputType = Float(8, 24), weightT
 	val scaled_out = t
 	//val profiling_out = 0.U.asTypeOf(u)
 
+	// val t_rec = if (t.isRecoded) t.bits else recFNFromFN(t.expWidth, t.sigWidth, t.bits)
+	// //val t_raw = if (t.isRecoded) rawFloatFromRecFN(t.expWidth, t.sigWidth, t.bits) else rawFloatFromFN(t.expWidth, t.sigWidth, t.bits)
+	
+	// val rec_fn_to_in = Module(new RecFNToIN(t_rec.expWidth, t_rec.sigWidth, 8))
+	// rec_fn_to_in.io.in := t_rec
+        // rec_fn_to_in.io.roundingMode := consts.round_near_even
+        // rec_fn_to_in.io.signedOut := true.B
+
+        // val overflow = rec_fn_to_in.io.intExceptionFlags(1)
+	// val rounded_int = rec_fn_to_in.io.out
+        // //val maxsat = "b001000010111111100000000000000000".U
+        // //val minsat = "b101000011000000000000000000000000".U
+	// val maxsat = RecFNFromFN(t_rec.expWidth, t_rec.sigWidth, "h42fe0000".U)
+        // val minsat = RecFNFromFN(t_rec.expWidth, t_rec.sigWidth, "hc3000000".U)
+        // val sign = t_rec(t_rec.expWidth + t_rec.sigWidth)
+        // val sat = Mux(sign, minsat, maxsat)
+
+	// val rounded_int_overflow = Mux(overflow, sat, rounded_int)
+	// val in_to_rec_fn = Module(new INToRecFN(8, t_rec.expWidth, t_rec.sigWidth))
+
+	// in_to_rec_fn.io.signedIn := true.B
+        // in_to_rec_fn.io.in := rounded_int_overflow
+        // in_to_rec_fn.io.roundingMode := consts.round_near_even
+        // in_to_rec_fn.io.detectTininess := false.B
+        // val rounded_rec_fn = in_to_rec_fn.io.out
+
+	// val rounded_rec_fn_raw = rawFloatFromRecFN(rounded_rec_fn.expWidth, rounded_rec_fn.sigWidth, rounded_rec_fn)
+	// val t_rec_raw = rawFloatFromRecFN(t_rec.expWidth, t_rec.sigWidth, t_rec)
+
+	// val add_rec_fn = Module(new AddRecFN(t_rec.expWidth, t_rec.sigWidth))
+
+	// add_rec_fn.io.subOp := true.B
+	// add_rec_fn.io.a := t_rec_raw
+	// add_rec_fn.io.b := rounded_rec_fn_raw
+	// add_rec_fn.io.roundingMode := consts.round_near_even
+	// add_rec_fn.io.detectTininess := false.B
+
+	// val difference_raw = add_rec_fn.io.out
+
+	// //Find divisor
+
+	
+
+        //val exceptionFlags = Output(Bits(5.W))
+	//val raw_to_rounded_rec_fn = Module(new RoundRawFNToRecFN(t_raw.expWidth, t_raw.sigWidth))
+
+	//val overflow = rec_fn_to_in.io.intExceptionFlags(1)
 	val profiling_out = Arithmetic.FloatArithmetic.cast(u).identity
 
 	val out = Wire(new ScaleFuncOutputs(t,u))
@@ -159,7 +207,15 @@ val FP32ProfilingConfig = defaultFPConfig.copy(inputType = Float(8, 24), weightT
                                                tile_latency = 2,
                                                mvin_scale_args = Some(ProfilingScaleArguments((t: Float, u: Float) => {
 	val scaled_out = t * u
-	val profiling_out = 0.U.asTypeOf(u)
+	val profiling_out = {
+		val zero_bits =
+		Cat(
+		0.U(1.W),                     // sign = 0
+		0.U(u.expWidth.W),            // exponent = 0
+		0.U((u.sigWidth-1).W)         // mantissa = 0
+		)
+		zero_bits.asTypeOf(u)
+	}
 
 	val out = Wire(new ScaleFuncOutputs(t,u))
 	out.result := scaled_out

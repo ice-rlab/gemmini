@@ -77,7 +77,10 @@ object CounterEvent {
   val MATMUL_IN_PROGRESS = 48
   val MAC_BUSY = 49
 
-  val n = 50
+  val STREAM_READER_BUSY = 50
+  val STREAM_WRITER_BUSY = 51
+
+  val n = 52
 }
 
 object CounterExternal {
@@ -95,9 +98,16 @@ object CounterExternal {
 
   val TOTAL_MACS = 8
 
-  val PROFILING_SUM = 9
+  val PROFILING_SUM_A = 9
+  val PROFILING_SUM_B = 10
+  val PROFILING_SUM_D = 11
 
-  val n = 10
+  val BYTES_LOADED_A = 12
+  val BYTES_LOADED_B = 13
+  val BYTES_LOADED_D = 14
+  val BYTES_READ = 15
+
+  val n = 16
 
   val EXTERNAL_WIDTH = 32
 }

@@ -1,6 +1,7 @@
 package gemmini
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.{Config, Parameters}
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem._
@@ -108,7 +109,17 @@ object GemminiConfigs {
 
 	val scaled_result = Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t))
 
-	val profiling_val = 0.U.asTypeOf(f)
+	//val profiling_val = 0.U.asTypeOf(f)
+
+	val profiling_val = {
+		val zero_bits =
+		Cat(
+		0.U(1.W),                     // sign = 0
+		0.U(f.expWidth.W),            // exponent = 0
+		0.U((f.sigWidth-1).W)         // mantissa = 0
+		)
+		zero_bits.asTypeOf(f)
+	}
 
 	val out = Wire(new ScaleFuncOutputs(t, f))
 	out.result := scaled_result
@@ -375,7 +386,7 @@ object GemminiConfigs {
   )
 
   val countersConfig = defaultConfig.copy(use_firesim_simulation_counters=true, //trying to use same number of sp and acc banks as normal design, one bank not supported
-    num_counter = 255
+    num_counter = 255, has_normalizations = true,
   )
 
 //   val countersFloat2IntConfig = defaultConfig.copy(use_firesim_simulation_counters=true, //trying to use same number of sp and acc banks as normal design, one bank not supported

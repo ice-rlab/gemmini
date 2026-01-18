@@ -110,6 +110,8 @@ class LoadController[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig
   io.dma.req.bits.status := mstatus
   io.dma.req.bits.pixel_repeats := pixel_repeat
 
+  io.dma.req.bits.load_state_id := load_state_id
+
   // Command tracker IO
   cmd_tracker.io.alloc.valid := control_state === waiting_for_command && cmd.valid && DoLoad
   cmd_tracker.io.alloc.bits.bytes_to_read :=
@@ -180,6 +182,18 @@ class LoadController[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig
   io.counter.connectEventSignal(CounterEvent.LOAD_ACTIVE_CYCLE, control_state === sending_rows)
   io.counter.connectEventSignal(CounterEvent.LOAD_DMA_WAIT_CYCLE, control_state === waiting_for_dma_req_ready)
   io.counter.connectEventSignal(CounterEvent.LOAD_SCRATCHPAD_WAIT_CYCLE, io.dma.req.valid && !io.dma.req.ready)
+
+//   val bytes_loaded = RegInit(VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W))))
+
+//   when (io.counter.external_reset) {
+// 	bytes_loaded := VecInit(Seq.fill(3)(0.U(CounterExternal.EXTERNAL_WIDTH.W)))
+//   }.elsewhen (io.dma.resp.fire) {
+// 	bytes_loaded(load_state_id) := bytes_loaded(load_state_id) + io.dma.resp.bits.bytesRead
+//   }
+
+//   io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_A, bytes_loaded(0))
+//   io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_B, bytes_loaded(1))
+//   io.counter.connectExternalCounter(CounterExternal.BYTES_LOADED_D, bytes_loaded(2))
 
   if (use_firesim_simulation_counters) {
     PerfCounter(io.dma.req.valid && !io.dma.req.ready, "load_dma_wait_cycle", "cycles during which load controller is waiting for DMA to be available")
