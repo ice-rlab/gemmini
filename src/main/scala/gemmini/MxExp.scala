@@ -48,10 +48,13 @@ class AddBit(elemW: Int, outType: MxFormats) extends Module {
     val a = Input(SInt(elemW.W))
     val b = Input(SInt(elemW.W))
     val enable = Input(Bool())
-    val y = Output(UInt((outType.exp + 1).W))
+    // Two's-complement biased product exponent. exp + 2 bits: MxFpMul's normalization moves it by
+    // up to ~8 more, and the reachable range (subnormal x subnormal up to max x max) spans more
+    // than 2^(exp + 1) values, so an exp + 1 result wrapped deep underflow onto overflow codes.
+    val y = Output(UInt((outType.exp + 2).W))
   })
   val partial1 = io.a +& io.b
   val bias = 2.S +& outType.bias.S.pad(outType.exp + 1)
   val result = partial1 +& bias
-  io.y := Mux(io.enable, result.pad(outType.exp+1).asUInt(outType.exp, 0), 0.U((outType.exp + 1).W))
+  io.y := Mux(io.enable, result.pad(outType.exp + 2).asUInt(outType.exp + 1, 0), 0.U((outType.exp + 2).W))
 }

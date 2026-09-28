@@ -121,7 +121,10 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
       ext_mem.read_req.ready := r_node.a.ready
 
       val w_shifted_addr = (ext_mem.write_req.bits.addr << req_size.U).asUInt
-      val w_mask = (ext_mem.write_req.bits.mask << (w_shifted_addr & (w_edge.manager.beatBytes - 1).U)).asUInt
+      // Bit-slice (not `&` mask) the shift amount: `&` only restricts the value, not the
+      // declared width, so the dynamic shift below would be sized for an 18-bit shift amount
+      // (2^18-1 extra bits) instead of the log2Ceil(beatBytes) bits this is ever shifted by.
+      val w_mask = (ext_mem.write_req.bits.mask << w_shifted_addr(log2Ceil(w_edge.manager.beatBytes) - 1, 0)).asUInt
 
       w_node.a.valid := ext_mem.write_req.valid
       w_node.a.bits := w_edge.Put(w_source.value,
@@ -301,10 +304,13 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
 
       // FP8 mode: bypass requantizer
     when (useMxB) {
-      // bypass requantizer: expand spad data to 16 x 12-bit for the execute stage
+      // bypass requantizer: expand spad data to DIM x 12-bit for the execute stage
       val proj = read_projected(b).resp
-      val padded_data = WireInit(0.U((16 * 12).W))
-      val spad_data_vec = proj.bits.data.asTypeOf(Vec(16, UInt(8.W)))
+      // val padded_data = WireInit(0.U((16 * 12).W))
+      // val spad_data_vec = proj.bits.data.asTypeOf(Vec(16, UInt(8.W)))
+      // 16 -> outer.config.DIM: hardcoded mesh-width assumption blocking dim != 16 configs
+      val padded_data = WireInit(0.U((outer.config.DIM * 12).W))
+      val spad_data_vec = proj.bits.data.asTypeOf(Vec(outer.config.DIM, UInt(8.W)))
       when(ex_controller.io.weight_mx_format_out === 0.U) {
         padded_data := VecInit(spad_data_vec.map(_.pad(12))).asUInt
       }.elsewhen(ex_controller.io.weight_mx_format_out === 2.U) {
@@ -457,12 +463,15 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
   // Writing to spad from ex
   for (i <- 0 until outer.config.sp_banks) {
     spad.module.io.srams.write(i).addr := ex_controller.io.srams.write(i).addr  // Default assignments
-    spad.module.io.srams.write(i).mask := ex_controller.io.srams.write(i).mask.take(16)
+    // spad.module.io.srams.write(i).mask := ex_controller.io.srams.write(i).mask.take(16)
+    // 16 -> outer.config.DIM: hardcoded mesh-width assumption blocking dim != 16 configs
+    spad.module.io.srams.write(i).mask := ex_controller.io.srams.write(i).mask.take(outer.config.DIM)
 
     ex_controller.io.srams.write(i).ready := spad.module.io.srams.write(i).ready
     spad.module.io.srams.write(i).valid := ex_controller.io.srams.write(i).valid
     
-    val spad_data_vec = ex_controller.io.srams.write(i).data.asTypeOf(Vec(16, UInt(12.W)))
+    // 16 -> outer.config.DIM (one 12-bit element per mesh column), same as the mask above
+    val spad_data_vec = ex_controller.io.srams.write(i).data.asTypeOf(Vec(outer.config.DIM, UInt(12.W)))
     spad.module.io.srams.write(i).data := VecInit(spad_data_vec.map(a => a(7, 0))).asUInt
   }
 
@@ -785,6 +794,40 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
   // Wire up global RoCC signals
   io.busy := raw_cmd.valid || loop_conv_unroller_busy || loop_matmul_unroller_busy || reservation_station.io.busy || spad.module.io.busy || unrolled_cmd.valid || loop_cmd.valid || conv_cmd.valid
 
+  // Configuration-Wall instrumentation: expose Gemmini's memory-communication
+  // stalls (data movement -- orthogonal to configuration, cf. Van Delm et al.
+  // ASPLOS'26 Sec 2.3). Read by GemminiTile's G2Stack classifier to form the
+  // `memData` bucket.
+  //
+  // `mem_stall` is the composite the memData bucket uses:
+  //   a DMA transfer is in progress (load OR store controller busy -- which
+  //   stays true through the *whole* transfer including in-flight response
+  //   latency, since cmd_tracker.io.busy holds until data lands) AND the
+  //   compute mesh is NOT running (!ex_controller.io.busy).
+  // So it counts ALL exposed memory time -- issue, TLB/xact/TL backpressure,
+  // and response latency -- while excluding memory that is hidden behind
+  // compute (mesh busy => the cycle stays `compute`).
+  //
+  // load_mem_stall / store_mem_stall are finer diagnostics: the per-path
+  // issue-boundary backpressure (dma.req.valid && !dma.req.ready), which
+  // transitively covers TLB miss / full XactTracker / TileLink backpressure
+  // (DMA.scala:245-249, XactTracker.scala:70). They may overlap `compute`.
+  //
+  // Left unread by other (RoCC) instantiations -- these are outputs, so no
+  // connection is required there.
+  val perf_io = IO(new Bundle {
+    val mem_stall       = Output(Bool())
+    val load_mem_stall  = Output(Bool())
+    val store_mem_stall = Output(Bool())
+    // # PEs committing a real MAC this cycle (0..DIM^2). Accumulated by the
+    // GemminiTile AutoCounter into integrated MAC-cycles for true MAC utilization.
+    val active_macs = Output(UInt(log2Up(DIM*DIM + 1).W))
+  })
+  perf_io.mem_stall :=
+    (load_controller.io.busy || store_controller.io.busy) && !ex_controller.io.busy
+  perf_io.load_mem_stall  := load_controller.io.dma.req.valid  && !load_controller.io.dma.req.ready
+  perf_io.store_mem_stall := store_controller.io.dma.req.valid && !store_controller.io.dma.req.ready
+
   io.interrupt := tlb.io.exp.map(_.interrupt).reduce(_ || _)
 
   // assert(!io.interrupt, "Interrupt handlers have not been written yet")
@@ -883,5 +926,7 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
   //=========================================================================
   // Performance Counters Access
   //=========================================================================
+
+  perf_io.active_macs := ex_controller.io.active_macs
 
 }

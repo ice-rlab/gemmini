@@ -64,6 +64,8 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
     val quant_lut_update_granularity = Output(UInt(16.W))
     val scaleMemCntl = Output(new ScalingFactorCntl(meshRows*tileRows))
     val loop_bounds = Output(new MaxBounds)
+
+    val active_macs = Output(UInt(log2Up(meshRows*tileRows*meshColumns*tileColumns + 1).W))
   })
 
 
@@ -92,6 +94,8 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
     }
   }
 
+
+  
   val unrolled_cmd = TransposePreloadUnroller(io.cmd, config, io.counter)
 
   val cmd_q_heads = 3
@@ -264,7 +268,8 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
   // Instantiate the actual mesh
   val mesh = Module(new MeshWithDelays(spatialArrayInputType, spatialArrayWeightType, spatialArrayOutputType, accType, mesh_tag, dataflow, tree_reduction, tile_latency, mesh_output_delay,
     tileRows, tileColumns, meshRows, meshColumns, shifter_banks, shifter_banks, meshProdPrecisionList, meshAccPrecisionList))
- 
+  
+  io.active_macs := mesh.io.active_macs
   mesh.io.activation_mx_format := activation_mx_format
   mesh.io.weight_mx_format := weight_mx_format
   
@@ -1069,8 +1074,11 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
 
   val address = mesh.io.resp.bits.tag.addr
   //val address_no_offset = (address.asUInt & (~("h_f".U)).asUInt).asTypeOf(address)
-  val address_no_offset = Cat(address.asUInt >> 4,
-  0.U(4.W)).asTypeOf(address)
+  // Row address = address with its element offset (low log2(block_size) bits) cleared. This was a
+  // hardcoded >> 4 (block_size 16): at dim 8 it also cleared bit 3, so accumulator tile groups at
+  // addresses 8..15 aliased onto group 0, and the group LoopMatmulStC later reads there was never written.
+  val address_no_offset = Cat(address.asUInt >> log2Ceil(block_size),
+    0.U(log2Ceil(block_size).W)).asTypeOf(address)
   val offset = address.asUInt % block_size.U
   
   val w_address = Mux(current_dataflow === Dataflow.WS.id.U, address_no_offset + output_counter * c_addr_stride,

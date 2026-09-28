@@ -798,9 +798,15 @@ class LoopMatmulStCSpad(block_size: Int, iterator_bitwidth: Int, max_addr: Int, 
 
   val acc_addr_start = req.src_addr
 
+  // For fp8 activations each j step moves one accumulator row: block_size cells of 64-bit
+  // (4 x bf16) MxFloat, i.e. 8 * block_size bytes, which is 8 scratchpad rows of block_size
+  // bytes at any dim. This used to be j*(block_size/2), which is 8 only at block_size 16;
+  // at dim 8 the j=1 store landed half a row early and overwrote j=0's second half.
+  // (j is always 0 at dim 16 with a 64-wide output, so dim-16 64-wide runs never exercised it.)
+  val acc_row_spad_rows = 8
   val dst_offset = MuxCase((i * req.max_j) * block_size.U * 2.U + j*(block_size/8).U, Seq(
-    (req.full_c || (req.output_mx_format === 3.U && req.activation_mx_format === 0.U)) -> ((i * req.max_j) * block_size.U * 2.U + j*(block_size/2).U),
-    (req.activation_mx_format === 0.U && (req.output_mx_format === 0.U)) -> (((i * req.max_j) * block_size.U * 2.U + j*(block_size/2).U)/2.U),
+    (req.full_c || (req.output_mx_format === 3.U && req.activation_mx_format === 0.U)) -> ((i * req.max_j) * block_size.U * 2.U + j*acc_row_spad_rows.U),
+    (req.activation_mx_format === 0.U && (req.output_mx_format === 0.U)) -> (((i * req.max_j) * block_size.U * 2.U + j*acc_row_spad_rows.U)/2.U),
     ((req.activation_mx_format === 1.U || req.activation_mx_format === 2.U) && (req.output_mx_format === 3.U)) -> ((i*req.max_j)*block_size.U*8.U + j * (block_size/4).U)
     ))
   val dst_addr = req.dst_addr + dst_offset

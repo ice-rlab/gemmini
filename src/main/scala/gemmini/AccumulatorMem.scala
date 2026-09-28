@@ -45,7 +45,9 @@ class AccumulatorWriteReq[T <: Data: Arithmetic](n: Int, t: Vec[Vec[T]]) extends
   val data = t.cloneType
   val acc = Bool()
   val mask = Vec(t.getWidth / 8, Bool()) // TODO Use aligned_to here
-  val offset = UInt(4.W) // TODO(nicolas): not hardcoded
+  // element offset inside an accumulator row, 0 until block_size (= meshColumns*tileColumns):
+  // ExecuteController drives it with address % block_size. Was UInt(4.W), i.e. block_size = 16.
+  val offset = UInt(log2Up(t.length * t.head.length).W)
 }
 
 
@@ -154,7 +156,8 @@ class AccumulatorMem[T <: Data, U <: Data](
   }
  
   def calculateScaleAddr(write_addr: UInt): UInt = {
-    (write_addr & (~("h_f".U)).asUInt).asUInt  // TODO: Using the accmulator write addr to caculate the scaling memory read addr, for simplification
+    // mask was "h_f" (block_size 16); ScalingFactorMem ignores read_req.addr, so this only removes the literal
+    (write_addr & (~((t.length * t.head.length - 1).U)).asUInt).asUInt  // TODO: Using the accmulator write addr to caculate the scaling memory read addr, for simplification
   }
   // def applyMxScaling(data: Vec[Vec[T]], scales: Vec[Vec[UInt]]): Vec[Vec[T]] = {
   //   val scaled = Wire(data.cloneType)
@@ -277,26 +280,29 @@ class AccumulatorMem[T <: Data, U <: Data](
       scale_mem.io.read_req.bits.scaling_enable := true.B
       scale_mem.io.read_req.bits.addr := calculateScaleAddr(io.write.bits.addr)
     }
+    // dim replaces hardcoded 16 (ported from upstream ucb-bar/gemmini gemmini-mx-cleanup
+    // commit 935a292c "add chunk id variable for flexible mesh sizes" -- not merged into
+    // this fork; the original hardcoded loops assumed meshRows*tileRows==16 and threw
+    // IndexOutOfBoundsException at any other mesh size).
+    val dim = meshRows * tileRows
     when(scale_mem.io.read_resp.valid) {
       when(dataType === 0.U) {
-        for (i <- 0 until 16) {
+        for (i <- 0 until dim) {
           val dataElement = Wire(UInt(64.W))
           val offset = pipelined_writes(0).bits.offset
-          dontTouch(offset)
           dataElement := pipelined_writes(0).bits.data(i).asUInt
 
           val scaled_result = WireInit(0.U(64.W))
-          when(i.U >= offset && i.U < (offset +& 4.U)) {
+          when(i.U >= offset && i.U < (offset +& (dim / 4).U)) {
             scaled_result:= VecInit(dataElement.asTypeOf(Vec(4, UInt(16.W))).zipWithIndex.map {
               case (e, j) =>
               val scale = scale_mem.io.read_resp.bits.combined_scales((i.U - offset)*4.U +& j.U)(8, 0)
-              dontTouch(scale)
               applyE9M0Scale(e, scale, 8, 7) }).asUInt
           }
           scaled_data(i) := scaled_result.asTypeOf(pipelined_writes(0).bits.data(i))
         }
       }.otherwise {
-        for (i <- 0 until 16) {
+        for (i <- 0 until dim) {
           val scaled_chunks = Wire(Vec(4, UInt(16.W)))
           val dataElement = Wire(UInt(64.W))
           dataElement := pipelined_writes(0).bits.data(i).asUInt
@@ -352,7 +358,13 @@ class AccumulatorMem[T <: Data, U <: Data](
   val block_read_req = WireInit(false.B)
   val block_write_req = WireInit(false.B)
 
-  val mask_len = t.getWidth / (8 * 32)
+  // One write-mask group per fp8 accumulator write. ExecuteController writes one PE j-tile at a
+  // time, block_size/4 cells wide (4 bf16 lanes per 64-bit cell), and zeroes every other cell of
+  // the row, so a mask group must not span two j-tiles. The old fixed 32-byte group is exactly
+  // one j-tile only at block_size 16; at block_size 8 it covered two, and the write for the
+  // second j-tile zeroed the first one's non-accumulated (k = 0) result.
+  val mask_group_bytes = ((t.length * t.head.length) / 4) * (t.head.head.getWidth / 8)
+  val mask_len = t.getWidth / (8 * mask_group_bytes)
   val mask_elem = UInt((t.getWidth / mask_len).W)
 
   // val ext_mem_write_q_enq = if (use_shared_ext_mem && use_tl_ext_ram) {
@@ -408,7 +420,7 @@ class AccumulatorMem[T <: Data, U <: Data](
     mem.io.waddr := oldest_pipelined_write.bits.addr
     mem.io.wen := oldest_pipelined_write.valid
     mem.io.wdata := Mux(oldest_pipelined_write.bits.acc, adder_sum, oldest_pipelined_write.bits.data)
-    mem.io.mask := VecInit(oldest_pipelined_write.bits.mask.grouped(32).map(_.reduce(_ || _)).toSeq)
+    mem.io.mask := VecInit(oldest_pipelined_write.bits.mask.grouped(mask_group_bytes).map(_.reduce(_ || _)).toSeq)
 
     // full-width read
     mem.io.raddr_full := io.write.bits.addr

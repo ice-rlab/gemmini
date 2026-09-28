@@ -13,7 +13,8 @@ class MxFpMul (lut: Boolean) (fpProductPrecision: (Int, Int), fpAccPrecision: Mx
   val outType2 = MxFormats(fpProductPrecision._1, fpProductPrecision._2)
   val outType4 = MxFormats(fpProductPrecision._1, fpProductPrecision._2)
   val cType = MxFormats(fpAccPrecision.expWidth, fpAccPrecision.sigWidth)
-  val totalAdderWidth = 4*(outType4.exp + 1)
+  // one signed exp + 2 bit exponent per lane (see AddBit)
+  val totalAdderWidth = 4*(outType4.exp + 2)
 
   val ts = TypeSupport(
     actSupportFp4 = true, actSupportFp6_1 = true, actSupportFp8_0 = true,
@@ -288,7 +289,7 @@ class MxFpMul (lut: Boolean) (fpProductPrecision: (Int, Int), fpAccPrecision: Mx
       expWidth = outType2.exp,
       sigWidth = outType2.sig,
       sign = out_signs(i*2),
-      exp = Mux(!shift_dir, out_e((i)*(totalAdderWidth/2) + outType2.exp, (i)*(totalAdderWidth/2)) -% out2_toRec_exp, out_e((i)*(totalAdderWidth/2) + outType2.exp, (i)*(totalAdderWidth/2)) +% out2_toRec_exp),
+      exp = Mux(!shift_dir, out_e((i)*(totalAdderWidth/2) + outType2.exp + 1, (i)*(totalAdderWidth/2)) -% out2_toRec_exp, out_e((i)*(totalAdderWidth/2) + outType2.exp + 1, (i)*(totalAdderWidth/2)) +% out2_toRec_exp),
       sig = out2_toRec_sig,
       inputNaN  = nanA || nanW,
       inputZero = in_a_mask(i) || in_w_mask(i % 2)
@@ -303,7 +304,7 @@ class MxFpMul (lut: Boolean) (fpProductPrecision: (Int, Int), fpAccPrecision: Mx
       expWidth = outType1.exp,
       sigWidth = outType1.sig,
       sign = out_signs(0),
-      exp = Mux(!out1_toRec_norm._3, out_e((i)*(totalAdderWidth) + outType1.exp, i*(totalAdderWidth)) -% out1_toRec_norm._2, out_e((i)*(totalAdderWidth) + outType1.exp, i*(totalAdderWidth)) +% out1_toRec_norm._2),
+      exp = Mux(!out1_toRec_norm._3, out_e((i)*(totalAdderWidth) + outType1.exp + 1, i*(totalAdderWidth)) -% out1_toRec_norm._2, out_e((i)*(totalAdderWidth) + outType1.exp + 1, i*(totalAdderWidth)) +% out1_toRec_norm._2),
       sig = out1_toRec_norm._1,
       inputNaN  = nanA || nanW,
       inputZero = in_a_mask(0) || in_w_mask(0)
@@ -349,13 +350,18 @@ class MxFpMul (lut: Boolean) (fpProductPrecision: (Int, Int), fpAccPrecision: Mx
 
 object MxPEOutToRaw {
   def apply(expWidth: Int, sigWidth: Int, sign: UInt, exp: UInt, sig: UInt, inputNaN: Bool, inputZero: Bool): RawFloat = {
-    val expIn = exp(expWidth, 0)
+    // exp is the biased product exponent, two's complement in expWidth + 2 bits (see AddBit).
+    // It used to be read as an unsigned expWidth + 1 bit field, so underflow below 2^-16 wrapped
+    // onto the overflow codes and came out as +-inf (or, deeper, as a large finite value).
+    // RawFloat.sExp is signed, so underflow now reaches the rounder as a small/negative sExp and
+    // rounds to zero like any other tiny result; only real overflow saturates.
+    val expIn = exp(expWidth + 1, 0).asSInt
     val fractIn = sig(sigWidth-2, 0)
 
-    val adjustedExp = expIn + ((BigInt(1) << (expWidth - 1)).U | 1.U)
-    val isSpecial = adjustedExp(expWidth, expWidth - 1) === 3.U
+    val adjustedExp = expIn +& ((BigInt(1) << (expWidth - 1)) | 1).S  // hardfloat sExp = unbiased + 2^expWidth
+    val isSpecial = adjustedExp >= (BigInt(3) << (expWidth - 1)).S
 
-    val satExp  = (BigInt(3) << (expWidth - 1)).U((expWidth + 1).W)
+    val satExp  = (BigInt(3) << (expWidth - 1)).S((expWidth + 2).W)
     val satFrac = ((BigInt(1) << (sigWidth - 1)) - 2).U((sigWidth - 1).W)
     val saturate      = isSpecial && !inputNaN
     val effectiveZero = (inputZero) && !inputNaN
@@ -365,7 +371,7 @@ object MxPEOutToRaw {
     out.isInf  := false.B
     out.isZero := effectiveZero
     out.sign   := sign
-    out.sExp   := Mux(inputNaN || saturate, satExp, adjustedExp(expWidth, 0)).zext
+    out.sExp   := Mux(inputNaN || saturate, satExp, adjustedExp(expWidth + 1, 0).asSInt)
     out.sig    := 0.U(1.W) ## !effectiveZero ## Mux(inputNaN || saturate, satFrac, fractIn)
     out
   }
