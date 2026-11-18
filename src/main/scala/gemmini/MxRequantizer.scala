@@ -166,7 +166,11 @@ class MxRequantizer[T <: Data](
   val (exp_bits, mant_bits, pmax, log2_pmax_floor) = MxFloatFormat(format_reg)
   val data_buffer_counter = RegInit(0.U(1.W))
   //buffer twice for 16-lane mode
-  val half_lanes = 16
+  // val half_lanes = 16
+  // 16 -> io.requant_data_in_gpu.bits.data.length (= config.numGPUInputLanes, guaranteed in
+  // scope/correct since it's the actual IO bundle's Vec size): hardcoded GPU-lane-count
+  // assumption blocking numLanes != 16 configs.
+  val half_lanes = io.requant_data_in_gpu.bits.data.length
   val input_32_buffer = WireDefault(VecInit(Seq.fill(io.outputnumLanes)(0.U(inputdataWidth.W))))
   val input_16_buffer_gpu = RegInit(VecInit(Seq.fill(io.outputnumLanes/2)(0.U(inputdataWidth.W))))
   val should_compute = Wire(Bool())
@@ -288,23 +292,32 @@ class MxRequantizer[T <: Data](
 
   
 
-  val fp6_lut_out     = Cat(quantLut.io.projected_data.bits.reverse)        
-  val fp6_row0        = (0 until 32).map(k => first_half_buf(4*k+3, 4*k))    
-  val fp6_row1        = (0 until 32).map(k => fp6_lut_out(4*k+3, 4*k))      
-  val fp6_interleaved = (0 until 16).flatMap { j => Seq(fp6_row0(2*j), fp6_row1(2*j), fp6_row0(2*j+1), fp6_row1(2*j+1)) }
-  val fp6_combined    = Cat(fp6_interleaved.reverse)   
-  val fp6_combined_wire = WireDefault(fp6_combined)                        
+  // 32 -> outputnumLanes, 16 -> outputnumLanes/2: hardcoded assumption that
+  // fp6_lut_out/extracted_data are 128 bits (32*4) wide, blocking dim != 16 configs now
+  // that outputnumLanes correctly scales with dim.
+  val fp6_lut_out     = Cat(quantLut.io.projected_data.bits.reverse)
+  // val fp6_row0        = (0 until 32).map(k => first_half_buf(4*k+3, 4*k))
+  // val fp6_row1        = (0 until 32).map(k => fp6_lut_out(4*k+3, 4*k))
+  // val fp6_interleaved = (0 until 16).flatMap { j => Seq(fp6_row0(2*j), fp6_row1(2*j), fp6_row0(2*j+1), fp6_row1(2*j+1)) }
+  val fp6_row0        = (0 until io.outputnumLanes).map(k => first_half_buf(4*k+3, 4*k))
+  val fp6_row1        = (0 until io.outputnumLanes).map(k => fp6_lut_out(4*k+3, 4*k))
+  val fp6_interleaved = (0 until io.outputnumLanes/2).flatMap { j => Seq(fp6_row0(2*j), fp6_row1(2*j), fp6_row0(2*j+1), fp6_row1(2*j+1)) }
+  val fp6_combined    = Cat(fp6_interleaved.reverse)
+  val fp6_combined_wire = WireDefault(fp6_combined)
   val fp6_lut_out_wire = WireDefault(fp6_lut_out)
   dontTouch(fp6_combined_wire)
   dontTouch(fp6_lut_out_wire)
 
-  val fp4_row0        = (0 until 32).map(k => first_half_buf(4*k+3, 4*k))
-  val fp4_row1        = (0 until 32).map(k => extracted_data(4*k+3, 4*k))
+  // val fp4_row0        = (0 until 32).map(k => first_half_buf(4*k+3, 4*k))
+  // val fp4_row1        = (0 until 32).map(k => extracted_data(4*k+3, 4*k))
+  val fp4_row0        = (0 until io.outputnumLanes).map(k => first_half_buf(4*k+3, 4*k))
+  val fp4_row1        = (0 until io.outputnumLanes).map(k => extracted_data(4*k+3, 4*k))
   val fp4_row0_wire = WireDefault(VecInit(fp4_row0))
   val fp4_row1_wire = WireDefault(VecInit(fp4_row1))
   dontTouch(fp4_row0_wire)
   dontTouch(fp4_row1_wire)
-  val fp4_interleaved = (0 until 16).flatMap { j => Seq(fp4_row0(2*j), fp4_row1(2*j), fp4_row0(2*j+1), fp4_row1(2*j+1)) }
+  // val fp4_interleaved = (0 until 16).flatMap { j => Seq(fp4_row0(2*j), fp4_row1(2*j), fp4_row0(2*j+1), fp4_row1(2*j+1)) }
+  val fp4_interleaved = (0 until io.outputnumLanes/2).flatMap { j => Seq(fp4_row0(2*j), fp4_row1(2*j), fp4_row0(2*j+1), fp4_row1(2*j+1)) }
   val fp4_combined    = Cat(fp4_interleaved.reverse)                       
   val fp4_combined_wire = WireDefault(fp4_combined)                        
   dontTouch(fp4_combined_wire)

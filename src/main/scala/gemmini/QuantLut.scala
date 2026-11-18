@@ -85,28 +85,36 @@ class QuantLut(
   }
   io.lut_write_act_out.ready := true.B
 
-  val projectedIndices = WireDefault(VecInit(Seq.fill(32)(0.U(raddrWidth.W))))
+  // val projectedIndices = WireDefault(VecInit(Seq.fill(32)(0.U(raddrWidth.W))))
+  // 32 -> outputnumLanes: already a constructor param on this class (line 36), just wasn't
+  // used here; hardcoded 32 blocks dim != 16 configs since outputnumLanes now scales 2*dim.
+  val projectedIndices = WireDefault(VecInit(Seq.fill(outputnumLanes)(0.U(raddrWidth.W))))
   val projectedDataValid = WireDefault(false.B)
   val counter_act_out = RegInit(0.U(log2Ceil(256).W))
+  // used_lut_act_out stays at 16: that's the LUT depth for a 4-bit index, not a lane count.
   val used_lut_act_out = WireDefault(VecInit(Seq.fill(16)(0.U(rdataWidth.W))))
   dontTouch(used_lut_act_out)
   val minIdx = WireDefault(0.U(raddrWidth.W))
-  val fp6Finders = Seq.fill(32)(Module(new FP6E3M2NearestFinder()))
+  // val fp6Finders = Seq.fill(32)(Module(new FP6E3M2NearestFinder()))
+  val fp6Finders = Seq.fill(outputnumLanes)(Module(new FP6E3M2NearestFinder()))
 
-  for (i <- 0 until 32) {
+  // for (i <- 0 until 32) {
+  for (i <- 0 until outputnumLanes) {
     fp6Finders(i).io.in_lut := VecInit(Seq.fill(16)(0.U(rdataWidth.W)))
     fp6Finders(i).io.in_fp6 := 0.U(6.W)
   }
 
   when(io.quant_fp6.valid) {
-    for (i <- 0 until 32) {
+    // for (i <- 0 until 32) {
+    for (i <- 0 until outputnumLanes) {
       used_lut_act_out := lutCache_act_out(counter_act_out >> io.quant_lut_update_granularity)
       fp6Finders(i).io.in_lut := used_lut_act_out
       fp6Finders(i).io.in_fp6 := io.quant_fp6.bits(i)
       projectedIndices(i) := fp6Finders(i).io.nearestIdx
     }
     projectedDataValid := true.B
-    when (counter_act_out === ((io.loop_bound_i << 5.U) - 1.U)){
+    // outputnumLanes (= 2*dim) outputs per quant_fp6 fire; was << 5, i.e. dim = 16
+    when (counter_act_out === ((io.loop_bound_i << log2Ceil(outputnumLanes).U) - 1.U)){
       counter_act_out := 0.U
     }.otherwise{
       counter_act_out := counter_act_out + 1.U
@@ -152,7 +160,8 @@ class QuantLut(
     
     when(io.spad_projected_data(i).resp.valid) {
       when(io.read_a) {
-        when(counter_i === ((io.loop_bound_i << 4.U) - 1.U)){
+        // dim (= outputnumLanes/2) rows per tile; was << 4, i.e. dim = 16
+        when(counter_i === ((io.loop_bound_i << log2Ceil(outputnumLanes / 2).U) - 1.U)){
           counter_i := 0.U
         }.otherwise{
           counter_i := counter_i + 1.U
@@ -160,7 +169,10 @@ class QuantLut(
         if (i < (sp_banks / 2)) {
           used_lut_act_0 := lutCache_act_in((counter_i << 1.U) >> io.quant_lut_update_granularity)
           used_lut_act_1 := lutCache_act_in(((counter_i << 1.U) + 1.U) >> io.quant_lut_update_granularity)
-          for (k <- 0 until 16) { //act data layout is k15a1, k15a0, k14a1, k14a0,...,k0a1,k0a0, each 4 bit, total 32*4
+          // for (k <- 0 until 16) { //act data layout is k15a1, k15a0, k14a1, k14a0,...,k0a1,k0a0, each 4 bit, total 32*4
+          // 16 -> (data width in 4-bit nibbles)/2, since 2 nibbles are consumed per iteration:
+          // hardcoded assumption that data is 128 bits (32 nibbles) wide, blocking dim != 16.
+          for (k <- 0 until (io.spad_projected_data(i).resp.bits.data.getWidth / 4 / 2)) {
             val chunk_4bit_0 = io.spad_projected_data(i).resp.bits.data(2*k*4 + 3, 2*k*4)
             val chunk_4bit_1 = io.spad_projected_data(i).resp.bits.data(2*k*4 + 7, 2*k*4 + 4)
             val deprojected_bit_0 = used_lut_act_0(chunk_4bit_0)
@@ -171,14 +183,19 @@ class QuantLut(
         }
       }
       when(io.read_d) {
-       when(counter_j === ((io.loop_bound_j << 4.U) - 1.U)){
+       // dim (= outputnumLanes/2) rows per tile; was << 4, i.e. dim = 16
+       when(counter_j === ((io.loop_bound_j << log2Ceil(outputnumLanes / 2).U) - 1.U)){
           counter_j := 0.U
         }.otherwise{
           counter_j := counter_j + 1.U
         }
         if (i >= (sp_banks / 2)) {
-          for (k <- 0 until 32) {
-            val used_lut_w = lutCache_weight((((counter_j >> 4.U) << 5.U) + k.U) >> io.quant_lut_update_granularity)
+          // for (k <- 0 until 32) {
+          // 32 -> (data width in 4-bit nibbles): hardcoded assumption that data is 128 bits
+          // (32 nibbles) wide, blocking dim != 16.
+          for (k <- 0 until (io.spad_projected_data(i).resp.bits.data.getWidth / 4)) {
+            // tile index (counter_j / dim) * outputnumLanes (= 2*dim) elements; was >> 4 << 5, i.e. dim = 16
+            val used_lut_w = lutCache_weight((((counter_j >> log2Ceil(outputnumLanes / 2).U) << log2Ceil(outputnumLanes).U) + k.U) >> io.quant_lut_update_granularity)
             val chunk_4bit = io.spad_projected_data(i).resp.bits.data((k+1)*4-1, k*4)
             deprojected_bits(k) := used_lut_w(chunk_4bit)
          

@@ -6,4 +6,4 @@
 	url = https://github.com/ucb-bar/libgemmini.git
 [submodule "software/gemmini-rocc-tests"]
 	path = software/gemmini-rocc-tests
-	url = https://github.com/Rakanic/gemmini-rocc-tests.git
+	url = git@github.com:ice-rlab/gemmini-rocc-tests.git

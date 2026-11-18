@@ -38,11 +38,12 @@ class Mesh[T <: Data : Arithmetic](inputType: T, weightType: T, outputType: T, a
     val out_control = Output(Vec(meshColumns, Vec(tileColumns, new PEControl(accType))))
     val out_id = Output(Vec(meshColumns, Vec(tileColumns, UInt(log2Up(max_simultaneous_matmuls).W))))
     val out_last = Output(Vec(meshColumns, Vec(tileColumns, Bool())))
+    val active_macs = Output(UInt(log2Up(meshRows*tileRows*meshColumns*tileColumns + 1).W))
   })
 
   private val ev = implicitly[Arithmetic[T]]
   import ev._
-
+ 
   // mesh(r)(c) => Tile at row r, column c
   val mesh: Seq[Seq[Tile[T]]] = Seq.tabulate(meshRows, meshColumns) { (r, c) =>
     Module(new Tile(inputType, weightType, meshAccPrecisionList(r), accType, df, tree_reduction, max_simultaneous_matmuls, tileRows, tileColumns, meshProdPrecisionList(r), meshAccPrecisionList(r)))
@@ -168,11 +169,21 @@ class Mesh[T <: Data : Arithmetic](inputType: T, weightType: T, outputType: T, a
   for (((((((b, c), v), ctrl), id), last), tile) <- io.out_b zip io.out_c zip io.out_valid zip io.out_control zip io.out_id zip io.out_last zip mesh.last) {
     // TODO we pipelined this to make physical design easier. Consider removing these if possible
     // TODO shouldn't we clock-gate these signals with "garbage" as well?
-    b := ShiftRegister(tile.io.out_b, output_delay)
+    // The bottom row's out_b is in meshAccPrecisionList(meshRows-1), which need not be outputType
+    // (dim-8 meshes built with the 16-entry default schedule had MxFloat(4,5,4) here). Both are 64-bit
+    // MxFloat bundles, so a bare := silently reinterprets e4 exponents (bias 7) as e8 (bias 127), a
+    // ~2^120 error. withWidthOf re-biases, and returns the value unchanged when the types already match,
+    // so this adds no hardware when the last precision entry equals outputType.
+    b := ShiftRegister(VecInit(tile.io.out_b.map(_.withWidthOf(outputType))), output_delay)
     c := ShiftRegister(tile.io.out_c, output_delay)
     v := ShiftRegister(tile.io.out_valid, output_delay)
     ctrl := ShiftRegister(tile.io.out_control, output_delay)
     id := ShiftRegister(tile.io.out_id, output_delay)
     last := ShiftRegister(tile.io.out_last, output_delay)
   }
+
+  // Count MACs active this cycle across the whole array. Tap the raw interior
+  // grid valids (not io.out_valid, which is only the output_delay-shifted bottom
+  // row) so systolic fill/drain skew is captured.
+  io.active_macs := PopCount(mesh.flatten.flatMap(_.io.out_valid))
 }

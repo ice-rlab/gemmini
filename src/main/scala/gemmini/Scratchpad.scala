@@ -60,7 +60,10 @@ class ScratchpadMemWriteRequest(local_addr_t: LocalAddr, acc_t_bits: Int, scale_
 
 }
 
-class WriteReqExpander(local_addr_t: LocalAddr, acc_t_bits: Int, scale_t_bits: Int)(implicit p: Parameters) extends Module {
+// class WriteReqExpander(local_addr_t: LocalAddr, acc_t_bits: Int, scale_t_bits: Int)(implicit p: Parameters) extends Module {
+// dim added as an explicit parameter (was hardcoded 16 throughout this class); passed in as
+// config.DIM from the single instantiation site below. Blocks dim != 16 configs otherwise.
+class WriteReqExpander(local_addr_t: LocalAddr, acc_t_bits: Int, scale_t_bits: Int, dim: Int)(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new ScratchpadMemWriteRequest(local_addr_t, acc_t_bits, scale_t_bits)))
     val out = Decoupled(new ScratchpadMemWriteRequest(local_addr_t, acc_t_bits, scale_t_bits))
@@ -68,15 +71,18 @@ class WriteReqExpander(local_addr_t: LocalAddr, acc_t_bits: Int, scale_t_bits: I
 
   val second_half = RegInit(false.B)
   val is_acc_write = io.in.bits.laddr.is_acc_addr && !io.in.bits.laddr.is_garbage()
-  val gmem_multiplier = Mux(io.in.bits.dest =/= 0.U, 1.U, 16.U)
+  // val gmem_multiplier = Mux(io.in.bits.dest =/= 0.U, 1.U, 16.U)
+  val gmem_multiplier = Mux(io.in.bits.dest =/= 0.U, 1.U, dim.U)
 
   val address_second_half_wide = io.in.bits.vaddr + (gmem_multiplier * MuxCase(4.U, Seq(
-    (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/16).U * 16.U),
+    // (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/16).U * 16.U),
+    (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/dim).U * dim.U),
     (io.in.bits.activation_mx_type === 1.U || io.in.bits.activation_mx_type === 2.U) -> (4.U * io.in.bits.max_j)
     )))
 
   val address_second_half_narrow = io.in.bits.vaddr + (gmem_multiplier * MuxCase(2.U, Seq(
-    (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/16).U * 16.U / 2.U),
+    // (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/16).U * 16.U / 2.U),
+    (io.in.bits.max_j <= 2.U && io.in.bits.activation_mx_type === 0.U) -> ((acc_t_bits/dim).U * dim.U / 2.U),
     (io.in.bits.activation_mx_type === 1.U || io.in.bits.activation_mx_type === 2.U) -> 0.U
   )))
   val address_second_half  = Mux(io.in.bits.output_mx_type === 3.U, address_second_half_wide, address_second_half_narrow)
@@ -382,7 +388,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
       val loop_bounds = Input(new MaxBounds())
     })
 
-    val write_req_expander = Module(new WriteReqExpander(local_addr_t, accType.getWidth, acc_scale_t_bits))
+    // val write_req_expander = Module(new WriteReqExpander(local_addr_t, accType.getWidth, acc_scale_t_bits))
+    val write_req_expander = Module(new WriteReqExpander(local_addr_t, accType.getWidth, acc_scale_t_bits, config.DIM))
     write_req_expander.io.in <> io.dma.write.req
     val write_dispatch_q = Queue(write_req_expander.io.out)
     
@@ -452,6 +459,10 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
     writer.module.io.req.bits.len := Mux(writeData_is_full_width && !write_issue_q.io.deq.bits.laddr.is_acc_addr,
       write_issue_q.io.deq.bits.len * (weightTypeProjected.getWidth / 8).U,
         Mux( writeData_is_full_width,
+          // One full-width write carries half an accumulator row: len cells of accType bits,
+          // halved, in bytes, i.e. len * accType.getWidth / (8 * 2). The 16 is bits-per-byte
+          // times the two halves, not DIM; writing DIM here doubled the length at dim 8, so
+          // every half-row write was sent as 64 bytes with only 32 bytes of data.
           write_issue_q.io.deq.bits.len * (accType.getWidth / 16).U,
           write_issue_q.io.deq.bits.len * (weightTypeProjected.getWidth / 4).U))
       
@@ -478,6 +489,7 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
       spad_writer.module.io.req.valid := write_issue_q.io.deq.valid && writeData.valid && write_issue_q.io.deq.bits.dest.asBool && (!acc_scale_unit.io.out.bits.is_garbage)
       spad_writer.module.io.req.bits.vaddr := config.tl_ext_mem_base.U | vaddr_offset
       spad_writer.module.io.req.bits.physical := write_issue_q.io.deq.bits.dest
+      // Half an accumulator row per write; see writer.module.io.req.bits.len above.
       spad_writer.module.io.req.bits.len := Mux(writeData_is_full_width,
         write_issue_q.io.deq.bits.len * (accType.getWidth / 16).U, write_issue_q.io.deq.bits.len * (weightTypeProjected.getWidth / 4).U)
       spad_writer.module.io.req.bits.data := MuxCase(writeData.bits, Seq(

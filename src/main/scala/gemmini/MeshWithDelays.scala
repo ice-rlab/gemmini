@@ -68,6 +68,7 @@ class MeshWithDelays[T <: Data: Arithmetic, U <: TagQueueTag with Data]
     val tags_in_progress = Output(Vec(tagqlen, tagType))
     val activation_mx_format = Input(UInt(2.W))
     val weight_mx_format = Input(UInt(2.W))
+    val active_macs = Output(UInt(log2Up(meshRows*tileRows*meshColumns*tileColumns + 1).W))
   })
 
   def shifted[T <: Data](x: Vec[Vec[T]], banks: Int, reverse: Boolean = false): Seq[Vec[T]] = {
@@ -181,6 +182,8 @@ class MeshWithDelays[T <: Data: Arithmetic, U <: TagQueueTag with Data]
   val d_shifter_in = WireInit(Mux(d_is_from_transposer,
     VecInit(transposer_out.flatten.reverse.grouped(tileRows).map(VecInit(_)).toSeq).asTypeOf(D_TYPE), d_buf))
   
+  io.active_macs := mesh.io.active_macs
+
   mesh.io.weight_mx_format := io.weight_mx_format
   mesh.io.activation_mx_format := io.activation_mx_format
   mesh.io.in_a := shifted(a_shifter_in, leftBanks)
